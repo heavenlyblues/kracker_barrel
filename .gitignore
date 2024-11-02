@@ -1,2 +1,16 @@
 # Ignore all directories in the main directory
 */
+
+# Ignore virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+
+# Ignore other environment and editor-specific files
+.DS_Store
+.vscode/
