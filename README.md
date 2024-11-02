@@ -16,5 +16,5 @@ This Python project implements a multi-process password cracker using bcrypt and
 2. Provide a wordlist (e.g., `rockyou.txt`) in `refs/` with passwords to attempt.
 
 To run the program:
-```bash
+bash
 python3 cracker_barrel.py
