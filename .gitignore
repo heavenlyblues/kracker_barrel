@@ -1,5 +1,6 @@
-# Ignore all directories in the main directory
-*/
+# Ignore these directories in the main directory
+/refs
+/docs
 
 # Ignore virtual environments
 .venv/
