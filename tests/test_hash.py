@@ -15,19 +15,21 @@ def hash_with_bcrypt(test_password):
     salt = bcrypt.gensalt(rounds=10)
     return bcrypt.hashpw(test_password, salt)
 
+def derive_b64_decode_concat(salt, test_password, kdf):
+    hashed_password = kdf.derive(test_password)
+    stored_salt = base64.urlsafe_b64encode(salt).decode()
+    decoded_hash = base64.urlsafe_b64encode(hashed_password).decode()
+    return stored_salt + "$" + decoded_hash
+
 def hash_with_scrypt(test_password):
     salt = os.urandom(16)
     kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
-    hashed_password = kdf.derive(test_password)
-    stored_salt = base64.urlsafe_b64encode(salt)
-    return stored_salt + b"\n" + base64.urlsafe_b64encode(hashed_password)
+    return derive_b64_decode_concat(salt, test_password, kdf)
 
 def hash_with_pbkdf2(test_password):
     salt = os.urandom(16)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000)
-    hashed_password = kdf.derive(test_password)
-    stored_salt = base64.urlsafe_b64encode(salt)
-    return stored_salt + b"\n" + base64.urlsafe_b64encode(hashed_password)
+    return derive_b64_decode_concat(salt, test_password, kdf)
 
 def unique_filename(filename):
     while os.path.exists(filename):
@@ -36,8 +38,12 @@ def unique_filename(filename):
 
 def save_to_file(output_file, hashed):
     hashed_password_filename = unique_filename(output_file)
-    with open(f"../refs/{hashed_password_filename}", "wb") as file:
-        file.write(hashed)
+    if isinstance(hashed, str):  # Use isinstance for type checking
+        with open(f"../refs/{hashed_password_filename}", "w") as file:
+            file.write(hashed)
+    elif isinstance(hashed, bytes):
+        with open(f"../refs/{hashed_password_filename}", "wb") as file:
+            file.write(hashed)
     return
 
 def get_command_line_args():
@@ -99,7 +105,7 @@ def main():
         if getattr(args, key):
             hashed = command()(test_password)
             save_to_file(args.output_file, hashed)
-            print(f"Test password: '{test_password.decode()}'")
+            print(f"Test password: {test_password.decode()}")
             print(f"Hashed using: {key}")
             print(f"Saved to: {args.output_file}")
             break
