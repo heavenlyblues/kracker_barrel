@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 def hash_with_argon(test_password):
     ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
-    return ph.hash(test_password).encode()
+    return ph.hash(test_password)
 
 def hash_with_bcrypt(test_password):
     salt = bcrypt.gensalt(rounds=10)
@@ -44,7 +44,7 @@ def save_to_file(output_file, hashed):
             print("String")
     elif isinstance(hashed, bytes):
         with open(f"../refs/{hashed_password_filename}", "wb") as file:
-            print("Byte-string")
+            print("Bytes")
             file.write(hashed)
     return
 

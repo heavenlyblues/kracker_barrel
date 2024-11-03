@@ -93,11 +93,32 @@ def main():
     start = time.time()
 
     args = get_command_line_args()
+    
+    """
+    # User input files later???
 
-    with open("refs/goodstuff_scrypt", "rb") as file:
-        target_hash = file.read()
-        
-    # Create a list of encoded passwords from file.
+    hash_to_crack = input("Enter filename of hashed password: ")
+    known_password_list = input("Enter list of pwned passwords to scan: ")
+    """
+
+    if args.bcrypt:
+        with open("refs/goodstuff_bcrypt", "rb") as file:
+            target_hash = file.read()
+            salt = ""
+    elif args.argon:
+        with open("refs/goodstuff_argon", "r") as file:
+            target_hash = file.read()
+            salt = ""
+    elif args.scrypt or args.pbkdf2:
+        with open("refs/goodstuff_pbkdf2", "r") as file:
+            for line in file:
+                salt, target_hash = line.strip().split("$")
+    print(salt, target_hash)
+    print(type(salt), type(target_hash))
+    ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
+    print(ph.verify(target_hash, "loveme"))
+    
+    # Create a list of encoded passwords from user input file.
     wordlist = []
     with open("refs/rockyou_sm.txt", "r", encoding="latin-1") as file:
         for line in file:
