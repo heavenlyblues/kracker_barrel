@@ -1,7 +1,6 @@
 import argparse
 import bcrypt
 import os
-import sys
 import base64
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -19,14 +18,16 @@ def hash_with_bcrypt(test_password):
 def hash_with_scrypt(test_password):
     salt = os.urandom(16)
     kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
-    hashed_password = base64.urlsafe_b64encode(kdf.derive(test_password))
-    return hashed_password
+    hashed_password = kdf.derive(test_password)
+    stored_salt = base64.urlsafe_b64encode(salt)
+    return stored_salt + b"\n" + base64.urlsafe_b64encode(hashed_password)
 
 def hash_with_pbkdf2(test_password):
     salt = os.urandom(16)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000)
-    hashed_password = base64.urlsafe_b64encode(kdf.derive(test_password))
-    return hashed_password
+    hashed_password = kdf.derive(test_password)
+    stored_salt = base64.urlsafe_b64encode(salt)
+    return stored_salt + b"\n" + base64.urlsafe_b64encode(hashed_password)
 
 def unique_filename(filename):
     while os.path.exists(filename):
@@ -103,7 +104,5 @@ def main():
             print(f"Saved to: {args.output_file}")
             break
     
-
-
 if __name__ == "__main__":
     main()
