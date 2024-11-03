@@ -95,15 +95,7 @@ def main():
     args = get_command_line_args()
 
     with open("refs/goodstuff_scrypt", "rb") as file:
-        lines = file.readlines()
-        if len(lines) == 1:
-            target_hash = lines[0].strip()
-            salt = None
-        elif len(lines) == 2:
-            salt = lines[0].strip()
-            target_hash = lines[1].strip()
-        else:
-            raise ValueError("File format is incorrect. Expected 1 or 2 lines only.")
+        target_hash = file.read()
         
     # Create a list of encoded passwords from file.
     wordlist = []
