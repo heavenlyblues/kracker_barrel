@@ -1,6 +1,6 @@
 import argparse
 import base64
-import re
+import passlib
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
@@ -11,7 +11,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 # Checks found flag and processes a chunk of the list of known passwords.
-# Reads one password at a time and checks for bcrypt match with the target hash.
+# Reads one password at a time and checks for hash match with the target hash.
+# Uses specific hash function to check hash depending on user input
 # If a match is found, sets the 'found_flag' to True in shared_dict and returns the matching password.
 # Returns False if no match is found within this chunk.
 def attempt_crack(hash_func, salt, target_hash, wordlist_chunk, shared_dict):

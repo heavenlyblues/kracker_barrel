@@ -1,20 +1,32 @@
-# Password Cracker with Parallel Processing
+# Password Cracker Tool
 
-This Python project implements a multi-process password cracker using bcrypt and a wordlist. It efficiently distributes password checks across multiple processes to search for a bcrypt match within a provided hash. The program terminates immediately upon finding a match, reducing unnecessary computations.
+## Overview
+This tool is designed to facilitate the testing of password strength by attempting to crack hashed passwords using various cryptographic algorithms. It supports multiple hashing algorithms such as Argon2, bcrypt, Scrypt, and PBKDF2.
 
 ## Features
-- Uses Python's `ProcessPoolExecutor` to parallelize bcrypt password checks.
-- Reads and divides a wordlist into chunks, processing each chunk independently.
-- Efficiently terminates once a matching password is found.
+- Supports multiple hashing algorithms.
+- Utilizes multiprocessing to enhance the cracking process.
+- Handles large lists of potential passwords efficiently.
+- Provides a clear display of processing status and results.
 
 ## Requirements
-- Python 3.x
 - `bcrypt` library (`pip install bcrypt`)
 
 ## Usage
 1. Place the target bcrypt hash in a file named `password_to_crack` under `refs/`.
 2. Provide a wordlist (e.g., `rockyou.txt`) in `refs/` with passwords to attempt.
 
-To run the program:
-bash
-python3 cracker_barrel.py
+## How It Works
+
+1.	Set up the hashing environment: Depending on the chosen algorithm, the tool prepares the environment, reads the salt and hash from a predefined file, and configures the KDF parameters.
+2.	Password file processing: Passwords from a specified file (rockyou_sm.txt) are loaded and split into manageable chunks.
+3.	Multiprocessing: Each chunk is processed in parallel across multiple processor cores.
+4.	Verification: Each password is tested against the stored hash. If a match is found, the tool flags success and terminates further processing.
+
+## Known Issues
+
+- This branch (new-feature-branch) is currently in development, and some features may not be fully functional.
+
+# Hash Generation Utility "test_hash.py"
+
+The provided Python script hash_generator.py is designed to create hashed versions of passwords using four different cryptographic algorithms: Argon2, bcrypt, Scrypt, and PBKDF2. This utility is useful for generating hashes to test the password cracker tool or for setting up your password verification systems.
