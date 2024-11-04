@@ -1,6 +1,5 @@
 import argparse
 import base64
-import passlib
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
@@ -15,7 +14,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 # Uses specific hash function to check hash depending on user input
 # If a match is found, sets the 'found_flag' to True in shared_dict and returns the matching password.
 # Returns False if no match is found within this chunk.
-def attempt_crack(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
+def crack_chunk(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
     if not shared_dict["found_flag"]:
         print(f"Processing chunk with {len(wordlist_chunk)} passwords")
     
@@ -25,41 +24,49 @@ def attempt_crack(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
         
         print(f"Attempting password: {known_password} (Type: {type(known_password)})")
         if hash_func == "argon":
-            ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
+            # ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1) ## HEAVY MODE ##
+            ph = PasswordHasher(time_cost=1, memory_cost=2**10, parallelism=1)  ## TESTING MODE - WEAK HASH ##
             try:
                 if ph.verify(target_hash, known_password):
                     shared_dict["found_flag"] = True
                     return known_password
-            except Exception as e:
-                print(f"Argon2 verification failed: {e}")
-            
+            except Exception: # as e:
+                pass
+                # print(f"Unexpected Argon2 error: {e}")
 
         elif hash_func == "bcrypt" and bcrypt.checkpw(known_password, target_hash):
             shared_dict["found_flag"] = True
             return known_password
         
         elif hash_func == "scrypt":
-            kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
-            if kdf.verify(known_password, target_hash):
-                shared_dict["found_flag"] = True
-                return known_password
-            else:
-                return False
+            # kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5) ## HEAVY MODE ##
+            kdf = Scrypt(salt=salt, length=32, n=2**8, r=18, p=1) ## TESTING MODE - WEAK HASH ##
+
+            try:
+                if kdf.derive(known_password) == target_hash:
+                    shared_dict["found_flag"] = True
+                    return known_password.decode()
+            except Exception: # as e:
+                pass
+                # print(f"Unexpected Scrypt error: {e}")
         
         elif hash_func == "pbkdf2":
-            kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000)
-            if kdf.verify(known_password, target_hash):
-                shared_dict["found_flag"] = True
-                return known_password
-            else:
-                return False
+            # kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000) ## HEAVY MODE ##
+            kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=1000) ## TESTING MODE - WEAK HASH ##
+            try:
+                if kdf.derive(known_password) == target_hash:
+                    shared_dict["found_flag"] = True
+                    return known_password.decode()
+            except Exception: # as e:
+                pass
+                # print(f"Unexpected PBKDF2 error: {e}")
                 
     return False
 
 # Wrapper function to pass attempt_crack function into 'executor.submit' method.
 # Allows for structured argument passing into attempt_crack.
 def crack_chunk_wrapper(hash_func, salt, target_hash, chunk, shared_dict):
-    return attempt_crack(hash_func, salt, target_hash, chunk, shared_dict)
+    return crack_chunk(hash_func, salt, target_hash, chunk, shared_dict)
 
 # Generator to yield chunks of the password list.
 # Yields chunks of size 'chunk_size' for distribution across multiple processes.
@@ -102,46 +109,49 @@ def main():
 
     args = get_command_line_args()
     
-    """
-    # User input files later???
+    # """
+    # # User input files later???
 
-    hash_to_crack = input("Enter filename of hashed password: ")
-    known_password_list = input("Enter list of pwned passwords to scan: ")
-    """
+    # hash_to_crack = input("Enter filename of hashed password: ")
+    # known_password_list = input("Enter list of pwned passwords to scan: ")
+    # """
 
     if args.bcrypt:
-        with open("refs/goodstuff_bcrypt", "rb") as file:
+        with open("refs/weak_bcrypt", "rb") as file:
             target_hash = file.read()
             salt = ""
             hash_func = "bcrypt"
     elif args.argon:
-        with open("refs/goodstuff_argon", "r") as file:
+        with open("refs/weak_argon", "r") as file:
             target_hash = file.read().strip()
             salt = ""
             hash_func = "argon"
     elif args.scrypt:
-        with open("refs/goodstuff_scrypt", "rb") as file:
-            for line in file:
-                saltish = line[:24]
-                hashish = line[25:]
-                salt = base64.urlsafe_b64encode(saltish)
-                target_hash = base64.urlsafe_b64encode(hashish)
-                hash_func = "scrypt"
+        with open("refs/weak_scrypt", "r") as file:
+            concatenated_base64 = file.read().strip()
+            # Salt is 16 bytes, so it will be 24 characters in Base64 (16 * 4 / 3 = 24)
+            # Hashed password is 32 bytes, so it will be 44 characters in Base64 (32 * 4 / 3 = 44)
+            salt_base64 = concatenated_base64[:24]         # First 24 characters for salt
+            hashed_password_base64 = concatenated_base64[24:]  # Remaining characters for hashed password
+            # Decode Base64 segments back to binary
+            salt = base64.urlsafe_b64decode(salt_base64)      # Decode salt back to 16-byte binary
+            target_hash = base64.urlsafe_b64decode(hashed_password_base64)  # Decode hash back to 32-byte binary
+            hash_func = "scrypt"
     elif args.pbkdf2:
-        with open("refs/goodstuff_pbkdf2", "rb") as file:
-            for line in file:
-                saltish = line[:24]
-                hashish = line[25:]
-                salt = base64.urlsafe_b64encode(saltish)
-                target_hash = base64.urlsafe_b64encode(hashish)
-                hash_func = "pbkdf2"
+        with open("refs/weak_pbkdf2", "r") as file:
+            concatenated_base64 = file.read().strip()
+            salt_base64 = concatenated_base64[:24]
+            hashed_password_base64 = concatenated_base64[24:]
+            salt = base64.urlsafe_b64decode(salt_base64)
+            target_hash = base64.urlsafe_b64decode(hashed_password_base64)
+            hash_func = "pbkdf2"
     
-    print(f"Salt is of type {type(salt)}: {salt}")
-    print(f"Target hash is of tyoe {type(target_hash)}: {target_hash}")
+    # print(f"Salt is of type {type(salt)}: {salt}") # DEBUG PRINTS
+    # print(f"Target hash is of type {type(target_hash)}: {target_hash}") # DEBUG PRINTS
     
     # Create a list of encoded passwords from file.
     wordlist = []
-    with open("refs/rockyou_sm.txt", "r", encoding="latin-1") as file:
+    with open("refs/rockyou_tiny.txt", "r") as file:
         for line in file:
             for word in line.strip().split():
                 wordlist.append(word.encode())
@@ -158,19 +168,21 @@ def main():
 
         # Initialize ProcessPoolExecutor to utilize 'num_workers' for distributed processing.
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = [] # List to store 'future' instances of each password-checking task.
-            for chunk in generate_chunks(wordlist, chunk_size):
-                if chunk: # For every chuck, create a future instance of 'attempt_crack'.
-                    future = executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, shared_dict)
-                    futures.append(future)
+            futures = []  # List to store 'future' instances of each password-checking task.
+            chunks = [chunk for chunk in generate_chunks(wordlist, chunk_size)]  # Generate all chunks first
+            
+            for chunk in chunks:
+                # For every chunk, create a future instance of 'attempt_crack'.
+                future = executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, shared_dict)
+                futures.append(future)
 
             # Iterate over 'future' executions of attempt_crack as they are complete.
             for future in as_completed(futures):
-                if shared_dict["found_flag"]:
-                    for f in futures:
-                        if not f.done():
-                            f.cancel()  # Gracefully cancel remaining futures
-                    break  # Exit loop once match is found                
+                # if shared_dict["found_flag"]:
+                #     for f in futures:
+                #         if not f.done():
+                #             f.cancel()  # Gracefully cancel remaining futures
+                #     break  # Exit loop once match is found                
                 try:
                     result = future.result()  # Retrieve the result from each future
                     if result:  # Check if result is a matching password

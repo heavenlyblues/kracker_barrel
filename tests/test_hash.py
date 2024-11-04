@@ -7,23 +7,25 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-def hash_with_argon(test_password):
-    ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
+
+
+def hash_with_argon(ph, test_password):
+    # ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
     return ph.hash(test_password)
 
-def hash_with_bcrypt(test_password):
-    salt = bcrypt.gensalt(rounds=10)
+def hash_with_bcrypt(rounds, test_password):
+    salt = bcrypt.gensalt(rounds=rounds)
     return bcrypt.hashpw(test_password, salt)
 
-def hash_with_scrypt(test_password):
-    salt = os.urandom(16)
-    kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
+def hash_with_scrypt(kdf, salt, test_password):
+    # salt = os.urandom(16)
+    # kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
     hashed = kdf.derive(test_password)
     return base64.urlsafe_b64encode(salt) + base64.urlsafe_b64encode(hashed)
 
-def hash_with_pbkdf2(test_password):
-    salt = os.urandom(16)
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000)
+def hash_with_pbkdf2(iterations, salt, test_password):
+    # salt = os.urandom(16)
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=iterations)
     hashed = kdf.derive(test_password)
     return base64.urlsafe_b64encode(salt) + base64.urlsafe_b64encode(hashed)
 
@@ -73,6 +75,12 @@ def get_command_line_args():
         action="store_true"
     )
 
+    parser.add_argument(
+        "-t", "--test_mode",
+        help="Reduces hashing difficulty for testing purposes.",
+        action="store_true"
+    )
+
     # Required positional argument
     parser.add_argument(
         "output_file", 
@@ -91,18 +99,31 @@ def get_command_line_args():
 def main():
     args = get_command_line_args()
 
+    if args.test_mode:
+        ph = PasswordHasher(time_cost=1, memory_cost=2**10, parallelism=1)
+        rounds = 5
+        salt = os.urandom(16)
+        kdf = Scrypt(salt=salt, length=32, n=2**8, r=18, p=1)
+        iterations = 1000
+    else:
+        ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
+        rounds = 10
+        salt = os.urandom(16)
+        kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
+        iterations=210000
+
     commands = {
-        "argon": lambda: hash_with_argon,
-        "bcrypt": lambda: hash_with_bcrypt,
-        "scrypt": lambda: hash_with_scrypt,
-        "pbkdf2": lambda: hash_with_pbkdf2
+        "argon": lambda pwd: hash_with_argon(ph, pwd),
+        "bcrypt": lambda pwd: hash_with_bcrypt(rounds, pwd),
+        "scrypt": lambda pwd: hash_with_scrypt(kdf, salt, pwd),
+        "pbkdf2": lambda pwd: hash_with_pbkdf2(iterations, salt, pwd)
     }
 
     test_password = input("Password for testing: ").encode()
 
     for key, command in commands.items():
         if getattr(args, key):
-            hashed = command()(test_password)
+            hashed = command(test_password)
             save_to_file(args.output_file, hashed)
             print(f"Test password: {test_password.decode()}")
             print(f"Hashed using: {key}")
