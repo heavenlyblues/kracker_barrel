@@ -1,5 +1,6 @@
 import argparse
 import base64
+import re
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
@@ -13,7 +14,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 # Reads one password at a time and checks for bcrypt match with the target hash.
 # If a match is found, sets the 'found_flag' to True in shared_dict and returns the matching password.
 # Returns False if no match is found within this chunk.
-def attempt_crack(salt, target_hash, wordlist_chunk, shared_dict):
+def attempt_crack(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
     if not shared_dict["found_flag"]:
         print(f"Processing chunk with {len(wordlist_chunk)} passwords")
     
@@ -22,36 +23,42 @@ def attempt_crack(salt, target_hash, wordlist_chunk, shared_dict):
             return False
         
         print(f"Attempting password: {known_password} (Type: {type(known_password)})")
-        if shared_dict["algo"] == "argon":
+        if hash_func == "argon":
             ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
-            if ph.verify(known_password, target_hash):
-                shared_dict["found_flag"] = True
-                return known_password
+            try:
+                if ph.verify(target_hash, known_password):
+                    shared_dict["found_flag"] = True
+                    return known_password
+            except Exception as e:
+                print(f"Argon2 verification failed: {e}")
+            
 
-        elif shared_dict["algo"] == "bcrypt" and bcrypt.checkpw(known_password, target_hash):
+        elif hash_func == "bcrypt" and bcrypt.checkpw(known_password, target_hash):
             shared_dict["found_flag"] = True
             return known_password
         
-        elif shared_dict["algo"] == "scrypt":
-            salt = base64.urlsafe_b64decode(salt)
+        elif hash_func == "scrypt":
             kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
             if kdf.verify(known_password, target_hash):
                 shared_dict["found_flag"] = True
                 return known_password
+            else:
+                return False
         
-        elif shared_dict["algo"] == "pbkdf2":
-            salt = base64.urlsafe_b64decode(salt)
+        elif hash_func == "pbkdf2":
             kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000)
             if kdf.verify(known_password, target_hash):
                 shared_dict["found_flag"] = True
                 return known_password
+            else:
+                return False
                 
     return False
 
 # Wrapper function to pass attempt_crack function into 'executor.submit' method.
 # Allows for structured argument passing into attempt_crack.
-def crack_chunk_wrapper(salt, target_hash, chunk, shared_dict):
-    return attempt_crack(salt, target_hash, chunk, shared_dict)
+def crack_chunk_wrapper(hash_func, salt, target_hash, chunk, shared_dict):
+    return attempt_crack(hash_func, salt, target_hash, chunk, shared_dict)
 
 # Generator to yield chunks of the password list.
 # Yields chunks of size 'chunk_size' for distribution across multiple processes.
@@ -105,20 +112,33 @@ def main():
         with open("refs/goodstuff_bcrypt", "rb") as file:
             target_hash = file.read()
             salt = ""
+            hash_func = "bcrypt"
     elif args.argon:
         with open("refs/goodstuff_argon", "r") as file:
-            target_hash = file.read()
+            target_hash = file.read().strip()
             salt = ""
-    elif args.scrypt or args.pbkdf2:
-        with open("refs/goodstuff_pbkdf2", "r") as file:
+            hash_func = "argon"
+    elif args.scrypt:
+        with open("refs/goodstuff_scrypt", "rb") as file:
             for line in file:
-                salt, target_hash = line.strip().split("$")
-    print(salt, target_hash)
-    print(type(salt), type(target_hash))
-    ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
-    print(ph.verify(target_hash, "loveme"))
+                saltish = line[:24]
+                hashish = line[25:]
+                salt = base64.urlsafe_b64encode(saltish)
+                target_hash = base64.urlsafe_b64encode(hashish)
+                hash_func = "scrypt"
+    elif args.pbkdf2:
+        with open("refs/goodstuff_pbkdf2", "rb") as file:
+            for line in file:
+                saltish = line[:24]
+                hashish = line[25:]
+                salt = base64.urlsafe_b64encode(saltish)
+                target_hash = base64.urlsafe_b64encode(hashish)
+                hash_func = "pbkdf2"
     
-    # Create a list of encoded passwords from user input file.
+    print(f"Salt is of type {type(salt)}: {salt}")
+    print(f"Target hash is of tyoe {type(target_hash)}: {target_hash}")
+    
+    # Create a list of encoded passwords from file.
     wordlist = []
     with open("refs/rockyou_sm.txt", "r", encoding="latin-1") as file:
         for line in file:
@@ -135,44 +155,32 @@ def main():
         shared_dict = manager.dict()
         shared_dict["found_flag"] = False
 
-        if args.argon:
-            shared_dict["algo"] = "argon"
-        elif args.bcrypt:
-            shared_dict["algo"] = "bcrypt"
-        elif args.scrypt:
-            shared_dict["algo"] = "scrypt"
-        elif args.pbkdf2:
-            shared_dict["algo"] = "pbkdf2"
-
         # Initialize ProcessPoolExecutor to utilize 'num_workers' for distributed processing.
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             futures = [] # List to store 'future' instances of each password-checking task.
             for chunk in generate_chunks(wordlist, chunk_size):
                 if chunk: # For every chuck, create a future instance of 'attempt_crack'.
-                    future = executor.submit(crack_chunk_wrapper, salt, target_hash, chunk, shared_dict)
+                    future = executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, shared_dict)
                     futures.append(future)
 
             # Iterate over 'future' executions of attempt_crack as they are complete.
             for future in as_completed(futures):
-                if shared_dict["found_flag"]:  # Check if any process has set the flag
-                    [f.cancel() for f in futures if not f.done()]  # Cancel all pending futures
+                if shared_dict["found_flag"]:
+                    for f in futures:
+                        if not f.done():
+                            f.cancel()  # Gracefully cancel remaining futures
+                    break  # Exit loop once match is found                
                 try:
-                    result = future.result()
-                    if result: # Password match found.
+                    result = future.result()  # Retrieve the result from each future
+                    if result:  # Check if result is a matching password
                         print(f"Password match found: {result}")
+                        shared_dict["found_flag"] = True  # Set the flag so other tasks stop
                         end = time.time()
                         print(f"Total time: {end - start} seconds")
-                        
-                        # # Immediately shut down executor to stop all other ongoing processes.
-                        # executor.shutdown(wait=False)
-                        break            
-                except CancelledError:
-                    continue  # Handle the cancellation of the future
+                        break  # Exit loop if a match is found
                 except Exception as e:
                     print(f"Error encountered: {e}")
         
-        executor.shutdown(wait=True)  # Graceful shutdown
-
         if not shared_dict["found_flag"]: # No password match found.
             end = time.time()
             print(f"Total time: {end - start}")

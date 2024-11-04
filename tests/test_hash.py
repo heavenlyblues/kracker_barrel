@@ -18,18 +18,14 @@ def hash_with_bcrypt(test_password):
 def hash_with_scrypt(test_password):
     salt = os.urandom(16)
     kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
-    hashed_password = kdf.derive(test_password)
-    stored_salt = base64.urlsafe_b64encode(salt).decode()
-    decoded_hash = base64.urlsafe_b64encode(hashed_password).decode()
-    return stored_salt + "$" + decoded_hash
+    hashed = kdf.derive(test_password)
+    return base64.urlsafe_b64encode(salt) + base64.urlsafe_b64encode(hashed)
 
 def hash_with_pbkdf2(test_password):
     salt = os.urandom(16)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=210000)
-    hashed_password = kdf.derive(test_password)
-    stored_salt = base64.urlsafe_b64encode(salt).decode()
-    decoded_hash = base64.urlsafe_b64encode(hashed_password).decode()
-    return stored_salt + "$" + decoded_hash
+    hashed = kdf.derive(test_password)
+    return base64.urlsafe_b64encode(salt) + base64.urlsafe_b64encode(hashed)
 
 def unique_filename(filename):
     while os.path.exists(filename):
@@ -38,6 +34,7 @@ def unique_filename(filename):
 
 def save_to_file(output_file, hashed):
     hashed_password_filename = unique_filename(output_file)
+    print(hashed)
     if isinstance(hashed, str):  # Use isinstance for type checking
         with open(f"../refs/{hashed_password_filename}", "w") as file:
             file.write(hashed)
