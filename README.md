@@ -1,13 +1,13 @@
-# Password Cracker Tool
+# Password Cracker Tool – work in progress
 
 ## Overview
-This tool is designed to facilitate the testing of password strength by attempting to crack hashed passwords using various cryptographic algorithms. It supports multiple hashing algorithms such as Argon2, bcrypt, Scrypt, and PBKDF2.
+This tool is designed to crack hashed passwords using various cryptographic algorithms. It supports multiple hashing algorithms such as Argon2, bcrypt, Scrypt, and PBKDF2. (Last two functions now currently working)
 
 ## Features
 - Supports multiple hashing algorithms.
 - Utilizes multiprocessing to enhance the cracking process.
-- Handles large lists of potential passwords efficiently.
-- Provides a clear display of processing status and results.
+- Handles large lists of potential passwords.
+- Provides a clear display of processing status and results. (Can be refined)
 
 ## Requirements
 - `bcrypt` library (`pip install bcrypt`)
@@ -29,4 +29,4 @@ This tool is designed to facilitate the testing of password strength by attempti
 
 # Hash Generation Utility "test_hash.py"
 
-The provided Python script hash_generator.py is designed to create hashed versions of passwords using four different cryptographic algorithms: Argon2, bcrypt, Scrypt, and PBKDF2. This utility is useful for generating hashes to test the password cracker tool or for setting up your password verification systems.
+The provided Python script hash_generator.py is designed to create hashed versions of passwords using four different cryptographic algorithms: Argon2, bcrypt, Scrypt, and PBKDF2. This utility is useful for generating hashes to test the password cracker tool.
