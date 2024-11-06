@@ -17,4 +17,4 @@ __pycache__/
 .vscode/
 
 # Ignore log files
-*.log
+hash_errors.log
