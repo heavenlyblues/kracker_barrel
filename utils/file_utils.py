@@ -53,9 +53,7 @@ def decode_base64_segments(concatenated_base64):
 
 def load_target(args):
     salt = None
-
-    if args.test_mode:
-        test_mode = True
+    test_mode = True if args.test_mode else False
 
     if args.bcrypt:
         try:
@@ -93,4 +91,4 @@ def load_target(args):
             print("Error: PBDFK2 target file not found.")
             sys.exit(1)
 
-    return target_hash, salt, hash_func, test_mode
+    return hash_func, salt, target_hash, test_mode

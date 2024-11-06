@@ -6,7 +6,7 @@ import bcrypt
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
 from itertools import islice
 import logging
@@ -46,68 +46,62 @@ def create_hash_function(hash_func, salt, test_mode):
 logging.basicConfig(filename="hash_errors.log", level=logging.ERROR,
                     format="%(asctime)s %(levelname)s %(message)s")
 
-def crack_chunk(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
+def crack_chunk(hash_func, salt, target_hash, chunk, shared_dict):
     if shared_dict["found_flag"]:
         return False, 0  # Exit if the password has been found elsewhere
     
-    print(f"Processing chunk with {len(wordlist_chunk)} passwords")
+    print(f"Processing chunk with {len(chunk)} passwords")
 
     # Create hash function object based on the hash_func and test_mode settings
-    hash_object = create_hash_function(hash_func, salt, shared_dict.get("test_mode", False))
+    hash_object = create_hash_function(hash_func, salt, shared_dict["test_mode"])
     attempted_count = 0
 
-    for known_password in wordlist_chunk:
+    for known_password in chunk:
         if shared_dict["found_flag"]:
             return False, attempted_count
 
         attempted_count += 1 
         print(f"Attempting password: {known_password} (Type: {type(known_password)})")
         
-        retry_attempts = 3  # Set a retry limit
-        for attempt in range(retry_attempts):
-            try:
-                if hash_func == "argon":
-                    if hash_object.verify(target_hash, known_password):
-                        shared_dict["found_flag"] = True
-                        return known_password, attempted_count
-                
-                elif hash_func == "bcrypt" and bcrypt.checkpw(known_password, target_hash):
+        try:
+            if hash_func == "argon": 
+                if hash_object.verify(target_hash, known_password):
                     shared_dict["found_flag"] = True
                     return known_password, attempted_count
-                
-                elif hash_func == "scrypt":
-                    if hash_object.derive(known_password) == target_hash:
-                        shared_dict["found_flag"] = True
-                        return known_password.decode(), attempted_count
-                
-                elif hash_func == "pbkdf2":
-                    if hash_object.derive(known_password) == target_hash:
-                        shared_dict["found_flag"] = True
-                        return known_password.decode(), attempted_count
             
-            except (TypeError, ValueError) as e:
-                # Catch specific verification errors (e.g., mismatched data types)
-                logging.error(f"{hash_func} verification failed for password "
-                              f"{known_password.decode(errors='ignore')}: {e}")
-                break  # Exit retry loop for unresolvable errors
+            elif hash_func == "bcrypt": 
+                if bcrypt.checkpw(known_password, target_hash):
+                    shared_dict["found_flag"] = True
+                    return known_password, attempted_count
+            
+            elif hash_func == "scrypt":
+                if hash_object.derive(known_password) == target_hash:
+                    print(f"Verifying scrypt target_hash: {target_hash}, password: {known_password}")
+                    shared_dict["found_flag"] = True
+                    return known_password.decode(), attempted_count
+            
+            elif hash_func == "pbkdf2":
+                if hash_object.derive(known_password) == target_hash:
+                    shared_dict["found_flag"] = True
+                    return known_password.decode(), attempted_count
+        
+        except (TypeError, ValueError) as e:
+            # Catch specific verification errors (e.g., mismatched data types)
+            logging.error(f"{hash_func} verification failed for password "
+                            f"{known_password.decode(errors='ignore')}: {e}")
+            break  # Exit retry loop for unresolvable errors
 
-            except MemoryError as e:
-                # Log critical failure and raise custom error to terminate if needed
-                logging.critical(f"MemoryError during {hash_func} "
-                                 f"verification for {known_password.decode(errors='ignore')}: {e}")
-                raise CustomHashingError(f"Critical memory error with {hash_func}")
+        except MemoryError as e:
+            # Log critical failure and raise custom error to terminate if needed
+            logging.critical(f"MemoryError during {hash_func} "
+                                f"verification for {known_password.decode(errors='ignore')}: {e}")
+            raise CustomHashingError(f"Critical memory error with {hash_func}")
 
-            except Exception as e:
-                # Log unexpected errors with a retry mechanism
-                logging.warning(f"Retry {attempt+1}/{retry_attempts} "
-                                f"for {hash_func} verification of password "
-                                f"{known_password.decode(errors='ignore')}: {e}")
-                time.sleep(0.5)  # Optional delay before retrying
-                if attempt == retry_attempts - 1:
-                    logging.error(f"{hash_func} verification failed after "
-                                  f"{retry_attempts} attempts for "
-                                  f"{known_password.decode(errors='ignore')}")
-                continue
+        except Exception as e:
+            # Log unexpected errors with a retry mechanism
+            logging.error(f"Unexpected {hash_func} error for password "
+                            f"{known_password.decode(errors='ignore')}: {e}")
+        continue
     
     return False, attempted_count
 
@@ -115,15 +109,6 @@ def crack_chunk(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
 # Allows for structured argument passing into attempt_crack.
 def crack_chunk_wrapper(hash_func, salt, target_hash, chunk, shared_dict):
     return crack_chunk(hash_func, salt, target_hash, chunk, shared_dict)
-
-# Function to generate chunks from the generator
-def generate_chunks(generator, chunk_size):
-    while True:
-        chunk = list(islice(generator, chunk_size))
-        if not chunk:
-            break
-        print(f"Generated chunk with {len(chunk)} passwords")        
-        yield chunk
 
 # Generator function to load the wordlist in batches
 def load_wordlist(filepath, batch_size=1000):
@@ -140,12 +125,11 @@ def load_wordlist(filepath, batch_size=1000):
 def run_cracker_barrel():
     # Refactored and moved all CLI and file handling to utils/file_utils.py
     args = get_command_line_args()
-    target_hash, salt, hash_func, test_mode = load_target(args)
+    hash_func, salt, target_hash, test_mode = load_target(args)
     
     num_cores = os.cpu_count()
     pool_workers = num_cores
-    thread_workers = num_cores * 4
-    chunk_size = 5000
+    chunk_size = 1000
     total_attempted = 0
 
     # Manager for multiprocessing, creating a shared dictionary "found_flag" for password match status.
@@ -155,45 +139,36 @@ def run_cracker_barrel():
         shared_dict["found_flag"] = False
         shared_dict["test_mode"] = test_mode
         
-        # Initialize ThreadPoolExecutor to process password file.
-        with ThreadPoolExecutor(max_workers=thread_workers) as thread_executor:
+        wordlist_gen = load_wordlist("refs/rockyou_med.txt", chunk_size)
+
+        # Initialize ProcessPoolExecutor to utilize 'num_workers' for hash processing.
+        with ProcessPoolExecutor(max_workers=pool_workers) as process_executor:
+            futures = []  # List to store 'future' instances of each password-checking task.
             
-            # Initialize ProcessPoolExecutor to utilize 'num_workers' for hash processing.
-            with ProcessPoolExecutor(max_workers=pool_workers) as process_executor:
-                futures = []  # List to store 'future' instances of each password-checking task.
-                
-                # ThreadPoolExecutor to generate chunks
-                chunk_future = thread_executor.submit(load_wordlist, "refs/rockyou_med.txt", chunk_size)
-                
-                # For each chunk generated by ThreadPoolExecutor, submit it to ProcessPoolExecutor
+            for chunk in wordlist_gen:
+                if shared_dict["found_flag"]:
+                    break
+
+                # Submit each chunk to ProcessPoolExecutor directly
+                future = process_executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, shared_dict)
+                futures.append(future)
+
+            # Iterate over 'future' executions of attempt_crack as they are complete.
+            for future in as_completed(futures):      
                 try:
-                    for chunk in chunk_future.result():
-                        if shared_dict["found_flag"]:
-                            break
-                
-                        # For every chunk, create a future instance of 'attempt_crack'.
-                        future = process_executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, shared_dict)
-                        futures.append(future)
+                    result, attempted_count = future.result()  # Retrieve the result from each future
+                    total_attempted += attempted_count
+
+                    if result:  # Check if result is a matching password
+                        print(f"Password match found: {result}")
+                        shared_dict["found_flag"] = True  # Set the flag so other tasks stop
+                        end = time.time()
+                        print(f"Total time: {end - start} seconds")
+                        print(f"Total passwords attempted: {total_attempted}")
+                        break  # Exit loop if a match is found
 
                 except Exception as e:
-                    print(f"Error while generating chunks: {e}")
-
-                # Iterate over 'future' executions of attempt_crack as they are complete.
-                for future in as_completed(futures):      
-                    try:
-                        result, attempted_count = future.result()  # Retrieve the result from each future
-                        total_attempted += attempted_count
-
-                        if result:  # Check if result is a matching password
-                            print(f"Password match found: {result}")
-                            shared_dict["found_flag"] = True  # Set the flag so other tasks stop
-                            end = time.time()
-                            print(f"Total time: {end - start} seconds")
-                            print(f"Total passwords attempted: {total_attempted}")
-                            break  # Exit loop if a match is found
-
-                    except Exception as e:
-                        print(f"Error encountered: {e}")
+                    print(f"Error encountered: {e}")
         
         if not shared_dict["found_flag"]: # No password match found.
             print(f"Total passwords attempted: {total_attempted}")
