@@ -1,13 +1,17 @@
-import argparse
-import base64
-import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Manager
+from utils.file_utils import *
+
 import bcrypt
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import Manager
+from itertools import islice
+
+import time
+
 
 # Checks found flag and processes a chunk of the list of known passwords.
 # Reads one password at a time and checks for hash match with the target hash.
@@ -68,97 +72,31 @@ def crack_chunk(hash_func, salt, target_hash, wordlist_chunk, shared_dict):
 def crack_chunk_wrapper(hash_func, salt, target_hash, chunk, shared_dict):
     return crack_chunk(hash_func, salt, target_hash, chunk, shared_dict)
 
-# Generator to yield chunks of the password list.
-# Yields chunks of size 'chunk_size' for distribution across multiple processes.
-def generate_chunks(wordlist, chunk_size):
-    for i in range(0, len(wordlist), chunk_size):
-        chunks = wordlist[i:i + chunk_size]
-        print(f"Generated chunk with {len(chunks)} passwords")        
-        yield chunks
+# Function to generate chunks from the generator
+def generate_chunks(generator, chunk_size):
+    while True:
+        chunk = list(islice(generator, chunk_size))
+        if not chunk:
+            break
+        print(f"Generated chunk with {len(chunk)} passwords")        
+        yield chunk
 
-def get_command_line_args():
-    parser = argparse.ArgumentParser(
-        description="Select a hashing algorithm to crack the password file"
-    )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "-a", "--argon", 
-        help="Argon2id hash with parameters: m=2**14, t=3, p=1", 
-        action="store_true"
-    )
-    group.add_argument(
-        "-b", "--bcrypt", 
-        help="Bcrypt hash with minimum work factor of 10", 
-        action="store_true"
-    )
-    group.add_argument(
-        "-s", "--scrypt", 
-        help="Scrypt hash with parameters: N=2**14, r=8, p=5", 
-        action="store_true"
-    )
-    group.add_argument(
-        "-p", "--pbkdf2", 
-        help="PDKDF2 hash with parameters: algorithm=SHA512, iterations=210000", 
-        action="store_true"
-    )
-    args = parser.parse_args()
-    return args
+# Generator function to load the wordlist
+def load_wordlist(filepath):
+    with open(filepath, "r", encoding="latin-1") as file:
+        for line in file:
+            yield line.strip().encode()
+
 
 def main():
     start = time.time()
-
+    
+    # Refactored and moved all CLI and file handling to utils/file_utils.py
     args = get_command_line_args()
+    target_hash, salt, hash_func = load_target(args)
     
-    # """
-    # # User input files later???
-
-    # hash_to_crack = input("Enter filename of hashed password: ")
-    # known_password_list = input("Enter list of pwned passwords to scan: ")
-    # """
-
-    if args.bcrypt:
-        with open("refs/weak_bcrypt", "rb") as file:
-            target_hash = file.read()
-            salt = ""
-            hash_func = "bcrypt"
-    elif args.argon:
-        with open("refs/weak_argon", "r") as file:
-            target_hash = file.read().strip()
-            salt = ""
-            hash_func = "argon"
-    elif args.scrypt:
-        with open("refs/weak_scrypt", "r") as file:
-            concatenated_base64 = file.read().strip()
-            # Salt is 16 bytes, so it will be 24 characters in Base64 (16 * 4 / 3 = 24)
-            # Hashed password is 32 bytes, so it will be 44 characters in Base64 (32 * 4 / 3 = 44)
-            salt_base64 = concatenated_base64[:24]         # First 24 characters for salt
-            hashed_password_base64 = concatenated_base64[24:]  # Remaining characters for hashed password
-            # Decode Base64 segments back to binary
-            salt = base64.urlsafe_b64decode(salt_base64)      # Decode salt back to 16-byte binary
-            target_hash = base64.urlsafe_b64decode(hashed_password_base64)  # Decode hash back to 32-byte binary
-            hash_func = "scrypt"
-    elif args.pbkdf2:
-        with open("refs/weak_pbkdf2", "r") as file:
-            concatenated_base64 = file.read().strip()
-            salt_base64 = concatenated_base64[:24]
-            hashed_password_base64 = concatenated_base64[24:]
-            salt = base64.urlsafe_b64decode(salt_base64)
-            target_hash = base64.urlsafe_b64decode(hashed_password_base64)
-            hash_func = "pbkdf2"
-    
-    # print(f"Salt is of type {type(salt)}: {salt}") # DEBUG PRINTS
-    # print(f"Target hash is of type {type(target_hash)}: {target_hash}") # DEBUG PRINTS
-    
-    # Create a list of encoded passwords from file.
-    wordlist = []
-    with open("refs/rockyou_tiny.txt", "r") as file:
-        for line in file:
-            for word in line.strip().split():
-                wordlist.append(word.encode())
-
-    # Configure Process Pool Executor with worker count and chunk size per worker.
     num_workers = 8
-    chunk_size = len(wordlist) // num_workers
+    chunk_size = 800
 
     # Manager for multiprocessing, creating a shared dictionary "found_flag" for password match status.
     # All processes running 'crack_chunk_wrapper' can consistently check and update found_flag.
@@ -166,23 +104,22 @@ def main():
         shared_dict = manager.dict()
         shared_dict["found_flag"] = False
 
+        wordlist_gen = load_wordlist("refs/rockyou.txt")
+
         # Initialize ProcessPoolExecutor to utilize 'num_workers' for distributed processing.
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             futures = []  # List to store 'future' instances of each password-checking task.
-            chunks = [chunk for chunk in generate_chunks(wordlist, chunk_size)]  # Generate all chunks first
             
-            for chunk in chunks:
+            for chunk in generate_chunks(wordlist_gen, chunk_size):
+                if shared_dict["found_flag"]:
+                    break # Stop if match found
+                
                 # For every chunk, create a future instance of 'attempt_crack'.
                 future = executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, shared_dict)
                 futures.append(future)
 
             # Iterate over 'future' executions of attempt_crack as they are complete.
-            for future in as_completed(futures):
-                # if shared_dict["found_flag"]:
-                #     for f in futures:
-                #         if not f.done():
-                #             f.cancel()  # Gracefully cancel remaining futures
-                #     break  # Exit loop once match is found                
+            for future in as_completed(futures):      
                 try:
                     result = future.result()  # Retrieve the result from each future
                     if result:  # Check if result is a matching password
