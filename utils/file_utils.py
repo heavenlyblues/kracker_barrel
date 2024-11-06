@@ -32,6 +32,12 @@ def get_command_line_args():
         help="PDKDF2 hash with parameters: algorithm=SHA512, iterations=210000", 
         action="store_true"
     )
+    parser.add_argument(
+        "-t", "--test_mode", 
+        help="Configures weaker hash function setting for quicker testing", 
+        action="store_true"
+    )
+
     args = parser.parse_args()
     return args
 
@@ -47,6 +53,9 @@ def decode_base64_segments(concatenated_base64):
 
 def load_target(args):
     salt = None
+
+    if args.test_mode:
+        test_mode = True
 
     if args.bcrypt:
         try:
@@ -84,4 +93,4 @@ def load_target(args):
             print("Error: PBDFK2 target file not found.")
             sys.exit(1)
 
-    return target_hash, salt, hash_func
+    return target_hash, salt, hash_func, test_mode
