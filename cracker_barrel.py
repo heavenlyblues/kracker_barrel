@@ -1,6 +1,6 @@
 import os
 import time
-from multiprocessing import Manager
+from multiprocessing import Event, Value
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from argon2 import PasswordHasher
@@ -11,43 +11,45 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from utils.file_utils import get_command_line_args, load_target
 
-def create_hash_function(hash_func, salt, test_mode):
+def create_hash_function(hash_func, salt, test_mode_flagged):
     """Create a hashing object based on the specified hash algorithm and test mode."""
     if hash_func == "argon":
         return PasswordHasher(
-            time_cost=1 if test_mode else 3, 
-            memory_cost=2**10 if test_mode else 12288, 
+            time_cost=1 if test_mode_flagged else 3, 
+            memory_cost=2**10 if test_mode_flagged else 12288, 
             parallelism=1
         )
     elif hash_func == "scrypt":
         return Scrypt(
             salt=salt, length=32, 
-            n=2**8 if test_mode else 2**14, 
-            r=18 if test_mode else 8, 
-            p=1 if test_mode else 5
+            n=2**8 if test_mode_flagged else 2**14, 
+            r=18 if test_mode_flagged else 8, 
+            p=1 if test_mode_flagged else 5
         )
     elif hash_func == "pbkdf2":
         return PBKDF2HMAC(
             algorithm=hashes.SHA512(), 
             length=32, salt=salt, 
-            iterations=1000 if test_mode else 210000
+            iterations=1000 if test_mode_flagged else 210000
         )
     return None  # bcrypt is handled directly without helper function
 
 def crack_chunk(hash_func, salt, target_hash, chunk, status_flags):
     """Process a chunk of passwords to find a match for the target hash."""
-    if status_flags["found_flag"]:
+    if status_flags["found_flag"].is_set():
         return False, 0  # Exit if the password has been found elsewhere
     
+    test_mode_flagged = status_flags["test_mode"].value
+
     # Reusable hash object for Argon and bcrypt only (single-use for others)
     reusable_hash_object = None
     if hash_func == "argon":
-        reusable_hash_object = create_hash_function("argon", salt, status_flags.get("test_mode", False))
+        reusable_hash_object = create_hash_function("argon", salt, test_mode_flagged)
     
     passwords_attempted = 0
 
     for known_password in chunk:
-        if status_flags["found_flag"]:
+        if status_flags["found_flag"].is_set():
             return False, passwords_attempted
 
         passwords_attempted += 1
@@ -58,26 +60,26 @@ def crack_chunk(hash_func, salt, target_hash, chunk, status_flags):
         try:
             # Check for Argon2
             if hash_func == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                status_flags["found_flag"] = True
+                status_flags["found_flag"].set()  # Use Event's set() method to signal found
                 return known_password, passwords_attempted
 
             # Check for bcrypt
             elif hash_func == "bcrypt" and bcrypt.checkpw(known_password, target_hash):
-                status_flags["found_flag"] = True
+                status_flags["found_flag"].set()
                 return known_password, passwords_attempted
 
             # Check for single-use Scrypt
             elif hash_func == "scrypt":
-                scrypt_object = create_hash_function("scrypt", salt, status_flags.get("test_mode", False))
+                scrypt_object = create_hash_function("scrypt", salt, test_mode_flagged)
                 if scrypt_object.derive(known_password) == target_hash:
-                    status_flags["found_flag"] = True
+                    status_flags["found_flag"].set()
                     return known_password.decode(), passwords_attempted
 
             # Check for single-use PBKDF2
             elif hash_func == "pbkdf2":
-                pbkdf2_object = create_hash_function("pbkdf2", salt, status_flags.get("test_mode", False))
+                pbkdf2_object = create_hash_function("pbkdf2", salt, test_mode_flagged)
                 if pbkdf2_object.derive(known_password) == target_hash:
-                    status_flags["found_flag"] = True
+                    status_flags["found_flag"].set()
                     return known_password.decode(), passwords_attempted
         
         except (TypeError, ValueError, MemoryError, Exception):
@@ -103,15 +105,11 @@ def load_wordlist(wordlist_path, batch_size=1000):
         if batch:  # Yield any remaining lines as the final batch
             yield batch
 
-    # Manager for multiprocessing, creating a shared dictionary "found_flag" for password match status.
-    # All processes running 'crack_chunk_wrapper' can consistently check and update found_flag.            
+    # Manager for multiprocessing, creating an Event "found_flag" for password match status.      
 def initialize_shared_resources(test_mode):
-    # Initialize a Manager and shared dictionary
-    manager = Manager()
-    status_flags = manager.dict()
-    status_flags["found_flag"] = False
-    status_flags["test_mode"] = test_mode
-    return status_flags
+    found_flag = Event()
+    test_mode_flag = Value('b', test_mode)  # 'b' for boolean
+    return {"found_flag": found_flag, "test_mode": test_mode_flag}
     
 def main():
     start_time = time.time()
@@ -126,7 +124,7 @@ def main():
     total_attempted = 0
 
     status_flags = initialize_shared_resources(test_mode)
-    password_batches = load_wordlist("refs/rockyou_med.txt", batch_size)
+    password_batches = load_wordlist("refs/rockyou.txt", batch_size)
 
     # Initialize ProcessPoolExecutor to utilize 'num_workers' for hash processing.
     with ProcessPoolExecutor(max_workers=cpu_workers) as process_executor:

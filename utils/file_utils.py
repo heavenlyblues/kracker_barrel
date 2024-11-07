@@ -1,15 +1,17 @@
 import argparse
+import subprocess
 import base64
 import sys
 
-BCRYPT_FILE = "./refs/weak_bcrypt"
-ARGON_FILE = "./refs/weak_argon"
-SCRYPT_FILE = "./refs/weak_scrypt"
-PBKDF2_FILE = "./refs/weak_pbkdf2"
+BCRYPT_FILE = "./refs/weak_bcrypt.enc"
+ARGON_FILE = "./refs/Ratrace_argon.enc"
+SCRYPT_FILE = "./refs/weak_scrypt.enc"
+PBKDF2_FILE = "./refs/weak_pbkdf2.enc"
 
 def get_command_line_args():
     parser = argparse.ArgumentParser(
-        description="Select a hashing algorithm to crack the password file"
+        description="CRACKER BARREL: Select a hashing algorithm to crack the password file.\n"
+        "TEST HASH MAKER: For testing Cracker Barrel. Runs test_hash.py to generate a user inputted hashed password."
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -34,12 +36,16 @@ def get_command_line_args():
     )
     parser.add_argument(
         "-t", "--test_mode", 
-        help="Configures weaker hash function setting for quicker testing", 
+        help="Configures weaker hash function parameters for quicker testing", 
         action="store_true"
     )
+    parser.add_argument(
+        "-x", action="store_true", 
+        help="Run TEST HASH MAKER with following: -a -b -s -p [-t] <<filename.pls>>"
+    )
 
-    args = parser.parse_args()
-    return args
+    args, extra_args = parser.parse_args()
+    return args, extra_args
 
 def decode_base64_segments(concatenated_base64):
     # Salt is 16 bytes, so it will be 24 characters in Base64 (16 * 4 / 3 = 24)
@@ -51,9 +57,22 @@ def decode_base64_segments(concatenated_base64):
     target_hash = base64.urlsafe_b64decode(hashed_password_base64)  # Decode hash back to 32-byte binary
     return salt, target_hash
 
-def load_target(args):
+def load_target(args, extra_args):
     salt = None
     test_mode = True if args.test_mode else False
+
+    # Check if -x argument was provided
+    if args.x:
+        print("Switching to test mode. Running test_hash.py...")
+
+        # Run test_hash.py with extra arguments
+        try:
+            subprocess.run([sys.executable, "tests/test_hash.py"] + extra_args, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to run test_hash.py: {e}")
+        
+        # Exit after running test_hash.py
+        sys.exit()
 
     if args.bcrypt:
         try:
