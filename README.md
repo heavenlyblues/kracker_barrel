@@ -1,7 +1,7 @@
 
 # Cracker Barrel: A Multiprocessing Password Cracker
 
-Cracker Barrel is a powerful, parallelized password-cracking tool designed to test passwords against known hashed values using common cryptographic hashing algorithms. This tool is optimized for speed using Python’s `ProcessPoolExecutor` and supports concurrent batch processing to handle large wordlists efficiently.
+Cracker Barrel is a powerful, parallelized password-cracking tool designed to test passwords against lists of compromised passwords using common cryptographic hashing algorithms. This tool is optimized for speed using Python’s `ProcessPoolExecutor` and supports concurrent batch processing to handle large wordlists efficiently.
 
 ## Table of Contents
 - [Features](#features)
