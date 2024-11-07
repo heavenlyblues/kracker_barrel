@@ -2,10 +2,11 @@ import argparse
 import base64
 import sys
 
-BCRYPT_FILE = "./refs/weak_bcrypt.enc"
-ARGON_FILE = "./refs/Ratrace_argon.enc"
-SCRYPT_FILE = "./refs/weak_scrypt.enc"
-PBKDF2_FILE = "./refs/weak_pbkdf2.enc"
+PASSWORD_LIST = "refs/rockyou.txt"
+ARGON_FILE = "./data/weak_argon.enc"
+BCRYPT_FILE = "./data/weak_bcrypt.enc"
+SCRYPT_FILE = "./data/weak_scrypt.enc"
+PBKDF2_FILE = "./data/weak_pbkdf2.enc"
 
 def get_command_line_args():
     parser = argparse.ArgumentParser(
@@ -55,22 +56,22 @@ def load_target(args):
     salt = None
     test_mode = True if args.test_mode else False
 
-    if args.bcrypt:
-        try:
-            with open(BCRYPT_FILE, "rb") as file:
-                target_hash = file.read()
-            hash_func = "bcrypt"
-        except FileNotFoundError:
-            print("Error: Bcrypt target file not found.")
-            sys.exit(1)
-
-    elif args.argon:
+    if args.argon:
         try:
             with open(ARGON_FILE, "r") as file:
                 target_hash = file.read().strip()
             hash_func = "argon"
         except FileNotFoundError:
             print("Error: Argon target file not found.")
+            sys.exit(1)
+
+    elif args.bcrypt:
+        try:
+            with open(BCRYPT_FILE, "rb") as file:
+                target_hash = file.read()
+            hash_func = "bcrypt"
+        except FileNotFoundError:
+            print("Error: Bcrypt target file not found.")
             sys.exit(1)
 
     elif args.scrypt:

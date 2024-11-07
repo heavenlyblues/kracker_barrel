@@ -1,6 +1,6 @@
 import os
 import time
-from multiprocessing import Event, Value
+from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from argon2 import PasswordHasher
@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from utils.file_utils import get_command_line_args, load_target
+from utils.file_utils import PASSWORD_LIST, get_command_line_args, load_target
 
 def create_hash_function(hash_func, salt, test_mode_flagged):
     """Create a hashing object based on the specified hash algorithm and test mode."""
@@ -36,50 +36,49 @@ def create_hash_function(hash_func, salt, test_mode_flagged):
 
 def crack_chunk(hash_func, salt, target_hash, chunk, status_flags):
     """Process a chunk of passwords to find a match for the target hash."""
-    if status_flags["found_flag"].is_set():
+    if status_flags["found_flag"]:
         return False, 0  # Exit if the password has been found elsewhere
     
-    test_mode_flagged = status_flags["test_mode"].value
-
-    # Reusable hash object for Argon and bcrypt only (single-use for others)
+    test_mode_flagged = status_flags["test_mode"]
     reusable_hash_object = None
+    passwords_attempted = 0
+
     if hash_func == "argon":
         reusable_hash_object = create_hash_function("argon", salt, test_mode_flagged)
     
-    passwords_attempted = 0
 
     for known_password in chunk:
-        if status_flags["found_flag"].is_set():
+        if status_flags["found_flag"]:
             return False, passwords_attempted
 
         passwords_attempted += 1
     
-        if passwords_attempted % 1000 == 0:
+        if passwords_attempted % 5000 == 0:
             print(f"Processing: {known_password.decode()} (Type: {type(known_password)})")
         
         try:
             # Check for Argon2
             if hash_func == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                status_flags["found_flag"].set()  # Use Event's set() method to signal found
+                status_flags["found_flag"] = True  # Use Event's set() method to signal found
                 return known_password, passwords_attempted
 
             # Check for bcrypt
             elif hash_func == "bcrypt" and bcrypt.checkpw(known_password, target_hash):
-                status_flags["found_flag"].set()
+                status_flags["found_flag"] = True
                 return known_password, passwords_attempted
 
             # Check for single-use Scrypt
             elif hash_func == "scrypt":
                 scrypt_object = create_hash_function("scrypt", salt, test_mode_flagged)
                 if scrypt_object.derive(known_password) == target_hash:
-                    status_flags["found_flag"].set()
+                    status_flags["found_flag"] = True
                     return known_password.decode(), passwords_attempted
 
             # Check for single-use PBKDF2
             elif hash_func == "pbkdf2":
                 pbkdf2_object = create_hash_function("pbkdf2", salt, test_mode_flagged)
                 if pbkdf2_object.derive(known_password) == target_hash:
-                    status_flags["found_flag"].set()
+                    status_flags["found_flag"] = True
                     return known_password.decode(), passwords_attempted
         
         except (TypeError, ValueError, MemoryError, Exception):
@@ -94,22 +93,50 @@ def crack_chunk_wrapper(hash_func, salt, target_hash, chunk, status_flags):
     return crack_chunk(hash_func, salt, target_hash, chunk, status_flags)
 
 # Generator function to load the wordlist in batches
-def load_wordlist(wordlist_path, batch_size=1000):
-    with open(wordlist_path, "r", encoding="latin-1") as file:
-        batch = []
-        for line in file:
-            batch.append(line.strip().encode())
-            if len(batch) >= batch_size:
-                yield batch  # Yield a full batch of passwords
-                batch = []   # Reset batch for the next set of lines
-        if batch:  # Yield any remaining lines as the final batch
-            yield batch
+def load_wordlist(wordlist_path, batch_size):
+    chunk_time_start = time.time()
+    try:
+        with open(wordlist_path, "r", encoding="latin-1") as file:
+            batch = []
+            for line in file:
+                batch.append(line.strip().encode())
+                if len(batch) >= batch_size:
+                    yield batch  # Yield a full batch of passwords
+                    chunk_time_end = time.time()
+                    print(f"Chunk load time: {chunk_time_end - chunk_time_start:1f}")
+                    batch = []   # Reset batch for the next set of lines
+            if batch:  # Yield any remaining lines as the final batch
+                yield batch
+    except FileNotFoundError:
+        print(f"{wordlist_path} - File not found.")
+
+def process_future_result(future, status_flags, total_attempted, start_time):
+    """Process the result of a completed future."""
+    try:
+        result, passwords_attempted = future.result()
+        total_attempted += passwords_attempted
+
+        if result:  # Check if a match was found
+            status_flags["found_flag"] = True  # Set flag to stop other processes
+            end_time = time.time()
+            print(f"Password match found: {result}")
+            print(f"Total passwords attempted: {total_attempted}")
+            print(f"Total time: {end_time - start_time:.2f} seconds")
+            print("Match found and program terminated.")
+            return True, total_attempted  # Indicate that a match was found
+
+    except Exception as e:
+        print(f"Error encountered: {e}")
+
+    return False, total_attempted  # Indicate that no match was found
 
     # Manager for multiprocessing, creating an Event "found_flag" for password match status.      
 def initialize_shared_resources(test_mode):
-    found_flag = Event()
-    test_mode_flag = Value('b', test_mode)  # 'b' for boolean
-    return {"found_flag": found_flag, "test_mode": test_mode_flag}
+    manager = Manager()
+    status_flags = manager.dict()
+    status_flags["found_flag"] = False
+    status_flags["test_mode"] = test_mode
+    return status_flags
     
 def main():
     start_time = time.time()
@@ -120,41 +147,47 @@ def main():
     num_cores = os.cpu_count()
     cpu_workers = num_cores
     batch_size = 5000
+    max_in_flight_futures = num_cores * 2  # Control the number of concurrent tasks
+
     
     total_attempted = 0
 
     status_flags = initialize_shared_resources(test_mode)
-    password_batches = load_wordlist("refs/rockyou.txt", batch_size)
+    
 
     # Initialize ProcessPoolExecutor to utilize 'num_workers' for hash processing.
     with ProcessPoolExecutor(max_workers=cpu_workers) as process_executor:
         futures = []  # List to store 'future' instances of each password-checking task.
         
-        for chunk in password_batches:
+        for chunk in load_wordlist(PASSWORD_LIST, batch_size):
             if status_flags["found_flag"]:
                 break
 
             # Submit each chunk to ProcessPoolExecutor directly
             future = process_executor.submit(crack_chunk_wrapper, hash_func, salt, target_hash, chunk, status_flags)
             futures.append(future)
+        
+            # If we have reached the limit of concurrent futures, wait for one to complete
+            if len(futures) >= max_in_flight_futures:
+                # Wait for one of the futures to complete before adding more
+                for completed_future in as_completed(futures):
+                    match_found, total_attempted = process_future_result(
+                        completed_future, status_flags, total_attempted, start_time
+                    )
+                    if match_found:
+                        return  # Exit immediately if a match is found
 
-        # Iterate over 'future' executions of attempt_crack as they are complete.
-        for future in as_completed(futures):      
-            try:
-                result, passwords_attempted = future.result()  # Retrieve the result from each future
-                total_attempted += passwords_attempted
+                    # Clean up completed futures to maintain the limit
+                    futures = [f for f in futures if not f.done()]
+                    break  # Exit after processing one completed future to keep submitting new chunks
 
-                if result:  # Check if result is a matching password
-                    status_flags["found_flag"] = True  # Set the flag so other tasks stop
-                    end_time = time.time()
-                    print(f"Password match found: {result}")
-                    print(f"Total passwords attempted: {total_attempted}")
-                    print(f"Total time: {end_time - start_time:1f}")
-                    print("Match found and program terminated.")    
-                    break  # Exit loop if a match is found
-
-            except Exception as e:
-                print(f"Error encountered: {e}")
+        # Handle any remaining futures after loading all chunks
+        for future in as_completed(futures):
+            match_found, total_attempted = process_future_result(
+                future, status_flags, total_attempted, start_time
+            )
+            if match_found:
+                return
     
     if not status_flags["found_flag"]: # No password match found.
         end_time = time.time()

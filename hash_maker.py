@@ -38,11 +38,11 @@ def save_to_file(output_file, hashed):
     hashed_password_filename = unique_filename(output_file)
     print(hashed)
     if isinstance(hashed, str):  # Use isinstance for type checking
-        with open(f"../refs/{hashed_password_filename}", "w") as file:
+        with open(f"data/{hashed_password_filename}", "w") as file:
             file.write(hashed)
             print("String")
     elif isinstance(hashed, bytes):
-        with open(f"../refs/{hashed_password_filename}", "wb") as file:
+        with open(f"data/{hashed_password_filename}", "wb") as file:
             print("Bytes")
             file.write(hashed)
     return
