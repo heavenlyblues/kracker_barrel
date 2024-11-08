@@ -89,9 +89,6 @@ def create_hash_function(hash_string):
             salt=salt,
             iterations=iterations
         )
-    elif "2b" in parts[1]:
-        target_hash = hash_string
-        return target_hash, None
     
     else:
         raise ValueError("Unsupported hash function")
@@ -101,14 +98,12 @@ def get_hash_flag(hash_string):
     
     if "argon" in parts[1]:
         hash_func_flag = "argon"
-    elif "2b" in parts[1]:
-        hash_func_flag = "bcrypt"
     elif "scrypt" in parts[1]:
         hash_func_flag = "scrypt"
     elif "pbkdf2" in parts[1]:  # Corrected to "pbkdf2"
         hash_func_flag = "pbkdf2"
     else:
-        raise ValueError("Unsupported hash function")
+        hash_func_flag = "bcrypt"
     return hash_func_flag
     
 def crack_chunk(hash_string, chunk, status_flag):
@@ -117,13 +112,11 @@ def crack_chunk(hash_string, chunk, status_flag):
         return False, 0  # Exit if the password has been found elsewhere
     
     hash_flag = get_hash_flag(hash_string)
-    
+    print(hash_flag)
     passwords_attempted = 0
 
     if hash_flag == "argon":
-        target_hash, hash_object = create_hash_function(hash_string)
-    elif hash_flag == "bcrypt":
-        target_hash, hash_object = create_hash_function(hash_string)
+        target_hash, reusable_hash_object = create_hash_function(hash_string)
 
     for known_password in chunk:
         if status_flag['found']:
@@ -133,11 +126,11 @@ def crack_chunk(hash_string, chunk, status_flag):
     
         if passwords_attempted % 1000 == 0:
             print(f"Processing: {known_password.decode()} (Type: {type(known_password)})")
-            print(f"Verifying target hash: {target_hash} with password: {known_password.decode()}")
+            # print(f"Verifying target hash: {target_hash} with password: {known_password.decode()}")
 
         try:
             # Check for Argon2
-            if hash_flag == "argon" and hash_object.verify(target_hash, known_password):
+            if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
                 status_flag['found'] = True  # Use Event's set() method to signal found
                 return known_password, passwords_attempted
 

@@ -2,7 +2,7 @@ import argparse
 import base64
 import sys
 
-PASSWORD_LIST = "refs/rockyou_med.txt"
+PASSWORD_LIST = "refs/rockyou_sm.txt"
 ARGON_FILE = "./data/strong_argon_pinkpop.enc"
 BCRYPT_FILE = "./data/weak_bcrypt.enc"
 SCRYPT_FILE = "./data/strong_scrypt.enc"
