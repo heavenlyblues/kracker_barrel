@@ -111,10 +111,10 @@ def main():
         time_cost, memory_cost, parallelism = 1, 2**10, 1 # Argon
         rounds = 5              # Bcrypt
         salt = os.urandom(16)   # PBKDF2 & Scrypt
-        n, r, p = 2**8, 18, 1   # Scrypt
+        n, r, p = 2**8, 8, 1   # Scrypt
         iterations = 1000       # PBDKF2
     else:
-        time_cost, memory_cost, parallelism = 3, 12288, 1 # Argon
+        time_cost, memory_cost, parallelism = 3, 2**14, 1 # Argon
         rounds = 10             # Bcrypt
         salt = os.urandom(16)   # PBKDF2 & Scrypt
         n, r, p = 2**14, 8, 5   # Scrypt
