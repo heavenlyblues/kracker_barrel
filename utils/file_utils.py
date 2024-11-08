@@ -3,10 +3,10 @@ import base64
 import sys
 
 PASSWORD_LIST = "refs/rockyou_med.txt"
-ARGON_FILE = "./data/strong_argon.enc"
+ARGON_FILE = "./data/strong_argon_pinkpop.enc"
 BCRYPT_FILE = "./data/weak_bcrypt.enc"
-SCRYPT_FILE = "./data/weak_scrypt.enc"
-PBKDF2_FILE = "./data/weak_pbkdf2.enc"
+SCRYPT_FILE = "./data/strong_scrypt.enc"
+PBKDF2_FILE = "./data/strong_pbkdf2.enc"
 
 def get_command_line_args():
     parser = argparse.ArgumentParser(
