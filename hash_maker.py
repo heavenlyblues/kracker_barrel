@@ -9,25 +9,33 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
 
-def hash_with_argon(ph, test_password):
-    # ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
+def hash_with_argon(tc, mc, p, test_password):
+    ph = PasswordHasher(time_cost=tc, memory_cost=mc, parallelism=p)
     return ph.hash(test_password)
 
 def hash_with_bcrypt(rounds, test_password):
     salt = bcrypt.gensalt(rounds=rounds)
     return bcrypt.hashpw(test_password, salt)
 
-def hash_with_scrypt(kdf, salt, test_password):
-    # salt = os.urandom(16)
-    # kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
+def hash_with_scrypt(salt, n, r, p, test_password):
+    # Set up the Scrypt KDF
+    kdf = Scrypt(salt=salt, length=32, n=n, r=r, p=p)
     hashed = kdf.derive(test_password)
-    return base64.urlsafe_b64encode(salt) + base64.urlsafe_b64encode(hashed)
+
+    # Encode salt and hash with base64 and decode to string
+    salt_b64 = base64.urlsafe_b64encode(salt).decode("utf-8")
+    hashed_b64 = base64.urlsafe_b64encode(hashed).decode("utf-8")
+
+    # Return formatted string including scrypt settings
+    return f"$scrypt$ln={n},r={r},p={p}${salt_b64}${hashed_b64}"
 
 def hash_with_pbkdf2(iterations, salt, test_password):
-    # salt = os.urandom(16)
     kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=iterations)
     hashed = kdf.derive(test_password)
-    return base64.urlsafe_b64encode(salt) + base64.urlsafe_b64encode(hashed)
+    # Encode salt and hash with base64 and decode to string
+    salt_b64 = base64.urlsafe_b64encode(salt).decode("utf-8")
+    hashed_b64 = base64.urlsafe_b64encode(hashed).decode("utf-8")
+    return f"$pbkdf2_sha512$iterations={iterations}${salt_b64}${hashed_b64}"
 
 def unique_filename(filename):
     while os.path.exists(filename):
@@ -100,22 +108,22 @@ def main():
     args = get_command_line_args()
 
     if args.test_mode:
-        ph = PasswordHasher(time_cost=1, memory_cost=2**10, parallelism=1)
-        rounds = 5
-        salt = os.urandom(16)
-        kdf = Scrypt(salt=salt, length=32, n=2**8, r=18, p=1)
-        iterations = 1000
+        time_cost, memory_cost, parallelism = 1, 2**10, 1 # Argon
+        rounds = 5              # Bcrypt
+        salt = os.urandom(16)   # PBKDF2 & Scrypt
+        n, r, p = 2**8, 18, 1   # Scrypt
+        iterations = 1000       # PBDKF2
     else:
-        ph = PasswordHasher(time_cost=3, memory_cost=12288, parallelism=1)
-        rounds = 10
-        salt = os.urandom(16)
-        kdf = Scrypt(salt=salt, length=32, n=2**14, r=8, p=5)
-        iterations=210000
+        time_cost, memory_cost, parallelism = 3, 12288, 1 # Argon
+        rounds = 10             # Bcrypt
+        salt = os.urandom(16)   # PBKDF2 & Scrypt
+        n, r, p = 2**14, 8, 5   # Scrypt
+        iterations = 210000     # PBDKF2
 
     commands = {
-        "argon": lambda pwd: hash_with_argon(ph, pwd),
+        "argon": lambda pwd: hash_with_argon(time_cost, memory_cost, parallelism, pwd),
         "bcrypt": lambda pwd: hash_with_bcrypt(rounds, pwd),
-        "scrypt": lambda pwd: hash_with_scrypt(kdf, salt, pwd),
+        "scrypt": lambda pwd: hash_with_scrypt(salt, n, r, p, pwd),
         "pbkdf2": lambda pwd: hash_with_pbkdf2(iterations, salt, pwd)
     }
 
