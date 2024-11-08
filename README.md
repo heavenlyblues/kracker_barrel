@@ -1,4 +1,4 @@
-# Kracker Barrel: Automated Multiprocessing Password Cracker
+# Kracker Barrel: Multiprocessing Password Cracker
 
 Cracker Barrel is an automated, high-performance password-cracking tool. Designed for extensive password testing, it operates using multiprocessing and auto-detection of hash parameters to handle varied cryptographic hashes, maximizing efficiency in password verification.
 
