@@ -3,7 +3,6 @@ import time
 import argparse
 import base64
 import sys
-import mmap
 from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -13,15 +12,12 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-PASSWORD_LIST = "refs/rockyou_med.txt"
-
-def add_base64_padding(b64_string):
-    """Add padding to a base64-encoded string if necessary."""
-    return b64_string + "=" * (-len(b64_string) % 4)
+PASSWORD_LIST = "refs/dictionary_eng.txt"
+COLOR = "\033[0;35m"
+RESET = "\033[0m"
 
 def create_hash_function(hash_string):
     """Create a hashing object based on the specified hash algorithm from hash_string."""
-
     parts = hash_string.split("$")
 
     if "argon" in parts[1]:
@@ -59,8 +55,8 @@ def create_hash_function(hash_string):
         n = int(parts[2].split("=")[1].split(",")[0])
         r = int(parts[2].split(",")[1].split("=")[1])
         p = int(parts[2].split(",")[2].split("=")[1])
-        salt_b64 = add_base64_padding(parts[3])
-        hash_b64 = add_base64_padding(parts[4])
+        salt_b64 = parts[3]
+        hash_b64 = parts[4]
 
         # Decode salt and target hash
         salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
@@ -76,8 +72,8 @@ def create_hash_function(hash_string):
 
         # Parse parameters
         iterations = int(parts[2].split("=")[1])
-        salt_b64 = add_base64_padding(parts[3])
-        hash_b64 = add_base64_padding(parts[4])
+        salt_b64 = parts[3]
+        hash_b64 = parts[4]
 
         # Decode salt and target hash
         salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
@@ -91,7 +87,7 @@ def create_hash_function(hash_string):
     else:
         raise ValueError("Unsupported hash function")
 
-
+# Gets the flag for crack_chunk()
 def get_hash_flag(hash_string):
     parts = hash_string.split("$")
 
@@ -99,12 +95,11 @@ def get_hash_flag(hash_string):
         hash_func_flag = "argon"
     elif "scrypt" in parts[1]:
         hash_func_flag = "scrypt"
-    elif "pbkdf2" in parts[1]:  # Corrected to "pbkdf2"
+    elif "pbkdf2" in parts[1]:
         hash_func_flag = "pbkdf2"
     else:
         hash_func_flag = "bcrypt"
     return hash_func_flag
-
 
 def crack_chunk(hash_string, chunk, status_flag):
     """Process a chunk of passwords to find a match for the target hash."""
@@ -130,14 +125,14 @@ def crack_chunk(hash_string, chunk, status_flag):
         try:
             # Check for Argon2
             if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                status_flag["found"] = True  # Use Event's set() method to signal found
-                return known_password
+                status_flag["found"] = True
+                return known_password.decode()
 
             # Check for bcrypt
             elif hash_flag == "bcrypt":
                 if bcrypt.checkpw(known_password, target_hash):
                     status_flag["found"] = True
-                    return known_password
+                    return known_password.decode()
 
             # Check for Scrypt
             elif hash_flag == "scrypt":
@@ -159,7 +154,7 @@ def crack_chunk(hash_string, chunk, status_flag):
 
     return False
 
-# Wrapper function to pass attempt_crack function into 'executor.submit' method.
+# Wrapper function to pass crack chunk function into 'executor.submit' method.
 # Allows for structured argument passing into attempt_crack.
 def crack_chunk_wrapper(hash_string, chunk, status_flag):
     return crack_chunk(hash_string, chunk, status_flag)
@@ -192,11 +187,7 @@ def process_future_result(future, status_flag, start_time):
 
         if result:  # Check if a match was found
             status_flag["found"] = True  # Set flag to stop other processes
-            end_time = time.time()
-            print(f"Password match found: {result}")
-            print(f"Total passwords attempted: {status_flag['count']}")
-            print(f"Total time: {end_time - start_time:.2f} seconds")
-            print("Match found and program terminated.")
+            print(f"{COLOR}Password match found: {RESET}{result}")
             return True  # Indicate that a match was found
 
     except Exception as e:
@@ -208,14 +199,25 @@ def process_future_result(future, status_flag, start_time):
     # Indicate that no match was found if no exceptions were raised
     return False  # No match found
 
+def display_summary(cpu_workers, max_in_flight_futures, batch_size, status, duration):
+    """Display a clean summary of the run."""
+    print(f"CPUs used: {cpu_workers}")
+    print(f"Max in flight futures: {max_in_flight_futures}")
+    print(f"Batch size: {batch_size}")
+    print(f"Total passwords attempted: {status['count']}")
+    print(f"Total time: {duration:.1f} seconds")
+    print(f"{COLOR}{status['message']}{RESET}")
+    status["printed_summary"] = True  # Set flag to avoid duplicate prints
+
+
 def get_command_line_args():
     parser = argparse.ArgumentParser(
-        description="KRACKER BARREL"
+        description=f"{COLOR}KRACKER BARREL{RESET}"
     )
     parser.add_argument(
         "input_file", 
         type=str, 
-        help="Enter the hashed password file name to crack."
+        help="Enter the hashed password file to crack."
     )
 
     args = parser.parse_args()
@@ -241,16 +243,16 @@ def main():
 
     num_cores = os.cpu_count()
     cpu_workers = num_cores
-    batch_size = 10000
+    batch_size = 5000
     max_in_flight_futures = num_cores * 2  # Control the number of concurrent tasks
-
-    total_attempted = 0
 
     # Manager for multiprocessing, creating an Event "found_flag" for password match status.
     manager = Manager()
     status_flag = manager.dict()
     status_flag["found"] = False
     status_flag["count"] = 0
+    status_flag["summary"] = False
+
 
     # Initialize ProcessPoolExecutor to utilize 'num_workers' for hash processing.
     with ProcessPoolExecutor(max_workers=cpu_workers) as process_executor:
@@ -261,19 +263,21 @@ def main():
                 break
 
             # Submit each chunk to ProcessPoolExecutor directly
-            future = process_executor.submit(
-                crack_chunk_wrapper, hash_string, chunk, status_flag
-            )
+            future = process_executor.submit(crack_chunk_wrapper, hash_string, chunk, status_flag)
             futures.append(future)
 
             # If we have reached the limit of concurrent futures, wait for one to complete
             if len(futures) >= max_in_flight_futures:
                 # Wait for one of the futures to complete before adding more
                 for completed_future in as_completed(futures):
-                    match_found, total_attempted = process_future_result(
-                        completed_future, status_flag, start_time
-                    )
-                    if match_found:
+                    match_found = process_future_result(completed_future, status_flag, start_time)
+                    if match_found and not status_flag["summary"]:
+                        status_flag["message"] = "Match found and program terminated."
+                        end_time = time.time()
+                        display_summary(
+                            cpu_workers, max_in_flight_futures, batch_size, 
+                            status_flag, end_time - start_time
+                        )
                         return  # Exit immediately if a match is found
 
                     # Clean up completed futures to maintain the limit
@@ -282,18 +286,23 @@ def main():
 
         # Handle any remaining futures after loading all chunks
         for future in as_completed(futures):
-            match_found = process_future_result(
-                future, status_flag, start_time
-            )
-            if match_found:
+            match_found = process_future_result(future, status_flag, start_time)
+            if match_found and not status_flag["summary"]:
+                status_flag["message"] = "Match found and program terminated."
+                end_time = time.time()
+                display_summary(
+                    cpu_workers, max_in_flight_futures, batch_size, 
+                    status_flag, end_time - start_time
+                )
                 return
 
     if not status_flag["found"]:  # No password match found.
         end_time = time.time()
-        print(f"Total passwords attempted: {total_attempted}")
-        print(f"Total time: {end_time - start_time:1f}")
-        print("No match found in word list. Program terminated.")
-
+        status_flag["message"] = "No match found in word list. Program terminated."
+        display_summary(
+            cpu_workers, max_in_flight_futures, 
+            batch_size, status_flag, end_time - start_time
+        )
 
 if __name__ == "__main__":
     main()
