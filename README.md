@@ -7,7 +7,7 @@ Cracker Barrel is an automated, high-performance password-cracking tool. Designe
 - [Getting Started](#getting-started)
 - [Supported Hash Algorithms](#supported-hash-algorithms)
 - [Customization](#customization)
-- [Test Tools: Hash Maker](#hash-maker:-password-hash-generation-tool)
+- [Test Tools: Hash Maker](#hash-maker-password-hash-generation-tool)
 
 ## Features
 
@@ -30,7 +30,7 @@ To start cracking, specify the file containing the hashed password:
 
 `python cracker_barrel.py <hashed_password_file>`
 
-### Options (Antiquated)
+### Options (retired)
 
 In previous versions, users could select the hashing algorithm manually with the following flags:
 
@@ -40,7 +40,7 @@ In previous versions, users could select the hashing algorithm manually with the
 - `-p`, `--pbkdf2`: Use PBKDF2HMAC.
 - `-t`, `--test_mode`: Enable test mode.
 
-*This manual selection has been replaced by automated detection, making these flags obsolete.*
+<span style="color:darkred">*This manual selection has been replaced by automated detection, making these flags obsolete.</span>
 
 ### Supported Hash Algorithms
 
