@@ -1,52 +1,89 @@
+# Kracker Barrel: Automated Multiprocessing Password Cracker
 
-# Cracker Barrel: A Multiprocessing Password Cracker
-
-Cracker Barrel is a powerful, parallelized password-cracking tool designed to test passwords against lists of compromised passwords using common cryptographic hashing algorithms. This tool is optimized for speed using Python’s `ProcessPoolExecutor` and supports concurrent batch processing to handle large wordlists efficiently.
+Cracker Barrel is an automated, high-performance password-cracking tool. Designed for extensive password testing, it operates using multiprocessing and auto-detection of hash parameters to handle varied cryptographic hashes, maximizing efficiency in password verification.
 
 ## Table of Contents
 - [Features](#features)
 - [Getting Started](#getting-started)
 - [Supported Hash Algorithms](#supported-hash-algorithms)
 - [Customization](#customization)
+- [Test Tools: Hash Maker](#hash-maker:-password-hash-generation-tool)
 
 ## Features
 
-- **Parallel Processing**: Optimized for multi-core systems with concurrent processing of password batches.
-- **Configurable Batch Size**: Process large wordlists with adjustable batch sizes to suit system memory limits and processing power.
-- **Multiple Hash Algorithms**: Supports Argon2, bcrypt, scrypt, and PBKDF2 with user-defined parameters.
-- **Efficient Memory Usage**: Chunks of wordlists are loaded and processed as they are read, minimizing memory usage.
-- **Error Handling**: Error handling could be more robust to ensure that exceptions are managed gracefully.
+**Auto-Detection**: Automatically identifies hashing algorithm and parameters based on input hash.
+**Parallel Processing**: Optimized for concurrent processing using Python’s ProcessPoolExecutor.
+**Configurable Batch Size**: Handles large wordlists in batches suited to system memory and processing power.
+**Multiple Hash Algorithms**: Supports Argon2, bcrypt, scrypt, and PBKDF2.
+**Optimized Memory Usage**: Loads and processes wordlist chunks dynamically.
+**Comprehensive Logging**: Provides process readout, including password attempts and chunk load times.
 
 ## Getting Started
 
-### Options
+Clone the repository and navigate to the project folder.
 
-- `-a`, `--argon`: Use the Argon2 hashing algorithm.
-- `-b`, `--bcrypt`: Use the bcrypt hashing algorithm.
-- `-s`, `--scrypt`: Use the scrypt hashing algorithm.
-- `-p`, `--pbkdf2`: Use the PBKDF2 hashing algorithm.
-- `-t`, `--test_mode`: Enable test mode to reduce hashing difficulty for faster testing.
+### Running Cracker Barrel
+
+Cracker Barrel auto-detects the hash algorithm and parameters from the input hash, simplifying the command to start the cracking process. 
+
+To start cracking, specify the file containing the hashed password:
+
+`python cracker_barrel.py <hashed_password_file>`
+
+### Options (Antiquated)
+
+In previous versions, users could select the hashing algorithm manually with the following flags:
+
+- `-a`, `--argon`: Use Argon2 hashing algorithm.
+- `-b`, `--bcrypt`: Use bcrypt.
+- `-s`, `--scrypt`: Use scrypt.
+- `-p`, `--pbkdf2`: Use PBKDF2HMAC.
+- `-t`, `--test_mode`: Enable test mode.
+
+*This manual selection has been replaced by automated detection, making these flags obsolete.*
 
 ### Supported Hash Algorithms
 
-- **Argon2**: Memory-intensive hashing algorithm with configurable time and memory costs.
-- **bcrypt**: A popular password-hashing algorithm with a work factor that adjusts difficulty.
-- **scrypt**: Memory-hard key derivation function ideal for password hashing.
-- **PBKDF2**: A well-established hash function that uses HMAC and is configurable with multiple iterations.
+- **Argon2**: Memory-intensive hashing with time and memory cost configuration.
+- **bcrypt**: Password hashing with adjustable work factor.
+- **scrypt**: Memory-hard key derivation function.
+- **PBKDF2**: Configurable with multiple iterations and HMAC.
 
 ## Customization
 
 ### Adjusting Batch Size and Concurrency
 
-To improve performance, you can adjust `batch_size` and `max_in_flight_futures` in the `main` function:
-
-- **`batch_size`**: Controls the number of passwords processed per batch. A higher value can increase performance but may use more memory.
-- **`max_in_flight_futures`**: Controls the number of concurrent tasks. Typically, twice the number of CPU cores is a good setting.
+Optimize performance by adjusting the `batch_size` and `max_in_flight_futures` settings in the `main` function:
+- **`batch_size`**: Controls passwords processed per batch. Higher values may boost performance but use more memory.
+- **`max_in_flight_futures`**: Manages concurrent tasks; typically, twice the CPU core count yields good results on my system.
 
 ### Hashing Parameters
 
-To configure hashing parameters, update values in `create_hash_function` to adjust the computational difficulty for each hash type. The `test_mode` flag enables reduced difficulty for testing purposes.
+No need to configure hashing parameters anymore, values in `create_hash_function` automatically parse the hash string to adjust the computational difficulty for each hash type. *The `test_mode` flag has been removed in this branch.*
 
-## License
+## Hash Maker: Password Hash Generation Tool
+
+Cracker Barrel includes a companion tool, Hash Maker, which generates hashes with specified algorithms and parameters for testing Cracker Barrel’s cracking capabilities. Test mode in this script are faster to process but below industry security standards. When hashes are generated in the regular mode they meet the NIST standard.
+
+### Using Hash Maker
+
+Use hash_maker.py to create test hashes. The tool automatically adjusts difficulty parameters when using the --test_mode flag.
+
+Example Usage:
+
+- `python hash_maker.py -a output_file`
+
+For Test Mode hashes, use:
+
+- `python hash_maker.py -a output_file -t`
+
+### Test Mode Parameters
+
+- **Argon2**: Time cost, memory cost, and parallelism reduced.
+- **bcrypt**: Reduced rounds.
+- **scrypt**: Lowered N, r, and p parameters.
+- **PBKDF2**: Fewer iterations.
+
+### License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
