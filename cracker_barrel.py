@@ -1,182 +1,15 @@
 import os
 import time
-import argparse
-import base64
-import sys
 from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from argon2 import PasswordHasher
-import bcrypt
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from utils.file_utils import load_wordlist, load_target
+from utils.hash_utils import crack_chunk_wrapper
+from utils.interface import get_command_line_args, display_summary
 
 PASSWORD_LIST = "refs/dictionary_eng.txt"
 COLOR = "\033[0;35m"
 RESET = "\033[0m"
-
-def create_hash_function(hash_string):
-    """Create a hashing object based on the specified hash algorithm from hash_string."""
-    parts = hash_string.split("$")
-
-    if "argon" in parts[1]:
-        # Expected format: $argon2id$v=19$m=1024,t=1,p=1$salt$hash
-        if len(parts) != 6 or parts[0] != "":
-            raise ValueError("Invalid Argon2 hash format")
-
-        try:
-            # Parse the version
-            version = int(parts[2].split("=")[1])
-
-            # Parse memory, time, and parallelism values individually
-            param_string = parts[3]  # m=1024,t=1,p=1
-            memory_cost = int(param_string.split(",")[0].split("=")[1])  # m=1024
-            time_cost = int(param_string.split(",")[1].split("=")[1])  # t=1
-            parallelism = int(param_string.split(",")[2].split("=")[1])  # p=1
-
-            # Decode the salt and target hash, ensuring padding
-            target_hash = hash_string
-
-        except (IndexError, ValueError) as e:
-            raise ValueError(f"Error parsing Argon2 hash string: {e}")
-
-        # Return the target_hash and PasswordHasher instance
-        return target_hash, PasswordHasher(
-            time_cost=time_cost, memory_cost=memory_cost, parallelism=parallelism
-        )
-
-    elif "scrypt" in parts[1]:
-        # Expected format: $scrypt$ln=16384,r=8,p=1$salt$hash
-        if len(parts) != 5 or parts[0] != "":
-            raise ValueError("Invalid scrypt hash format")
-
-        # Parse parameters
-        n = int(parts[2].split("=")[1].split(",")[0])
-        r = int(parts[2].split(",")[1].split("=")[1])
-        p = int(parts[2].split(",")[2].split("=")[1])
-        salt_b64 = parts[3]
-        hash_b64 = parts[4]
-
-        # Decode salt and target hash
-        salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
-        target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
-
-        # Return target_hash and scrypt KDF instance
-        return target_hash, Scrypt(salt=salt, length=32, n=n, r=r, p=p)
-
-    elif "pbkdf2" in parts[1]:
-        # Expected format: $pbkdf2_sha512$iterations=210000$salt$hash
-        if len(parts) != 5 or parts[0] != "":
-            raise ValueError("Invalid PBKDF2 hash format")
-
-        # Parse parameters
-        iterations = int(parts[2].split("=")[1])
-        salt_b64 = parts[3]
-        hash_b64 = parts[4]
-
-        # Decode salt and target hash
-        salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
-        target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
-
-        # Return target_hash and PBKDF2 KDF instance
-        return target_hash, PBKDF2HMAC(
-            algorithm=hashes.SHA512(), length=32, salt=salt, iterations=iterations
-        )
-
-    else:
-        raise ValueError("Unsupported hash function")
-
-# Gets the flag for crack_chunk()
-def get_hash_flag(hash_string):
-    parts = hash_string.split("$")
-
-    if "argon" in parts[1]:
-        hash_func_flag = "argon"
-    elif "scrypt" in parts[1]:
-        hash_func_flag = "scrypt"
-    elif "pbkdf2" in parts[1]:
-        hash_func_flag = "pbkdf2"
-    else:
-        hash_func_flag = "bcrypt"
-    return hash_func_flag
-
-def crack_chunk(hash_string, chunk, status_flag):
-    """Process a chunk of passwords to find a match for the target hash."""
-    if status_flag["found"]:
-        return False, 0  # Exit if the password has been found elsewhere
-
-    hash_flag = get_hash_flag(hash_string)
-
-    if hash_flag == "argon":
-        target_hash, reusable_hash_object = create_hash_function(hash_string)
-    if hash_flag == "bcrypt":
-        target_hash = hash_string.encode()
-
-    for known_password in chunk:
-        if status_flag["found"]:
-            return False
-        
-        status_flag["count"] += 1
-
-        if status_flag["count"] % 100 == 0:
-            print(f"Batch processing... {known_password.decode()}")
-        
-        try:
-            # Check for Argon2
-            if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                status_flag["found"] = True
-                return known_password.decode()
-
-            # Check for bcrypt
-            elif hash_flag == "bcrypt":
-                if bcrypt.checkpw(known_password, target_hash):
-                    status_flag["found"] = True
-                    return known_password.decode()
-
-            # Check for Scrypt
-            elif hash_flag == "scrypt":
-                target_hash, hash_object = create_hash_function(hash_string)
-                if hash_object.derive(known_password) == target_hash:
-                    status_flag["found"] = True
-                    return known_password.decode()
-
-            # Check for PBKDF2
-            elif hash_flag == "pbkdf2":
-                target_hash, hash_object = create_hash_function(hash_string)
-                if hash_object.derive(known_password) == target_hash:
-                    status_flag["found"] = True
-                    return known_password.decode()
-
-        except (TypeError, ValueError, MemoryError, Exception):
-            # Suppressed all error messages
-            pass
-
-    return False
-
-# Wrapper function to pass crack chunk function into 'executor.submit' method.
-# Allows for structured argument passing into attempt_crack.
-def crack_chunk_wrapper(hash_string, chunk, status_flag):
-    return crack_chunk(hash_string, chunk, status_flag)
-
-
-# Generator function to load the wordlist in batches
-def load_wordlist(wordlist_path, batch_size):
-    chunk_time_start = time.time()
-    try:
-        with open(wordlist_path, "r", encoding="latin-1") as file:
-            batch = []
-            for line in file:
-                batch.append(line.strip().encode())
-                if len(batch) >= batch_size:
-                    yield batch  # Yield a full batch of passwords
-                    chunk_time_end = time.time()
-                    print(f"Chunk load time: {chunk_time_end - chunk_time_start:1f}")
-                    batch = []  # Reset batch for the next set of lines
-            if batch:  # Yield any remaining lines as the final batch
-                yield batch
-    except FileNotFoundError:
-        print(f"{wordlist_path} - File not found.")
 
 def process_future_result(future, status_flag, start_time):
     """Process the result of a completed future."""
@@ -198,42 +31,6 @@ def process_future_result(future, status_flag, start_time):
     
     # Indicate that no match was found if no exceptions were raised
     return False  # No match found
-
-def display_summary(cpu_workers, max_in_flight_futures, batch_size, status, duration):
-    """Display a clean summary of the run."""
-    print(f"CPUs used: {cpu_workers}")
-    print(f"Max in flight futures: {max_in_flight_futures}")
-    print(f"Batch size: {batch_size}")
-    print(f"Total passwords attempted: {status['count']}")
-    print(f"Total time: {duration:.1f} seconds")
-    print(f"{COLOR}{status['message']}{RESET}")
-    status["printed_summary"] = True  # Set flag to avoid duplicate prints
-
-
-def get_command_line_args():
-    parser = argparse.ArgumentParser(
-        description=f"{COLOR}KRACKER BARREL{RESET}"
-    )
-    parser.add_argument(
-        "input_file", 
-        type=str, 
-        help="Enter the hashed password file to crack."
-    )
-
-    args = parser.parse_args()
-    return args
-
-# Load input file with target hash
-def load_target(args):
-    try:
-        with open(f"data/{args.input_file}","r") as file:
-            hash_string = file.readline().strip()
-
-    except FileNotFoundError:
-        print("Error: Target file not found.")
-        sys.exit(1)
-
-    return hash_string
 
 def main():
     start_time = time.time()
