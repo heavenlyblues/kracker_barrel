@@ -109,7 +109,7 @@ def crack_chunk(hash_string, chunk, status_flag):
         status_flag["count"] += 1
 
         if status_flag["count"] % 100 == 0:
-            print(f"Batch processing... {known_password.decode()}")
+            print(f"Batch processing... #{status_flag["count"]} {known_password.decode()}")
         
         try:
             # Check for Argon2
