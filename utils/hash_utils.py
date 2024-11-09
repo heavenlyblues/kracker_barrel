@@ -101,47 +101,49 @@ def crack_chunk(hash_string, chunk, status_flag):
         target_hash, reusable_hash_object = create_hash_function(hash_string)
     if hash_flag == "bcrypt":
         target_hash = hash_string.encode()
+    
+    chunk_count = 0
 
     for known_password in chunk:
         if status_flag["found"]:
-            return False
+            return False, chunk_count
         
-        status_flag["count"] += 1
-
-        if status_flag["count"] % 100 == 0:
-            print(f"Batch processing... #{status_flag["count"]} {known_password.decode()}")
+        chunk_count += 1
+        
+        # if chunk_count % 1000 == 0:
+        #     print(f"Batch processing... {known_password.decode()}")
         
         try:
             # Check for Argon2
             if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
                 status_flag["found"] = True
-                return known_password.decode()
+                return known_password.decode(), chunk_count
 
             # Check for bcrypt
             elif hash_flag == "bcrypt":
                 if bcrypt.checkpw(known_password, target_hash):
                     status_flag["found"] = True
-                    return known_password.decode()
+                    return known_password.decode(), chunk_count
 
             # Check for Scrypt
             elif hash_flag == "scrypt":
                 target_hash, hash_object = create_hash_function(hash_string)
                 if hash_object.derive(known_password) == target_hash:
                     status_flag["found"] = True
-                    return known_password.decode()
+                    return known_password.decode(), chunk_count
 
             # Check for PBKDF2
             elif hash_flag == "pbkdf2":
                 target_hash, hash_object = create_hash_function(hash_string)
                 if hash_object.derive(known_password) == target_hash:
                     status_flag["found"] = True
-                    return known_password.decode()
+                    return known_password.decode(), chunk_count
 
-        except (TypeError, ValueError, MemoryError, Exception):
-            # Suppressed all error messages
+        except Exception as e:
+            # Handle exceptions without affecting count tracking
             pass
 
-    return False
+    return False, chunk_count
 
 # Wrapper function to pass crack chunk function into 'executor.submit' method.
 # Allows for structured argument passing into attempt_crack.
