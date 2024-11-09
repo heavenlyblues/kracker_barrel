@@ -16,12 +16,11 @@ def load_wordlist(wordlist_path, batch_size):
     except FileNotFoundError:
         print(f"{wordlist_path} - File not found.")
 
+
 def get_wordlist_length(wordlist_path):
-    count = 0
     with open(wordlist_path, "r", encoding="latin-1") as file:
-        for line in file:
-            count += 1
-    return count
+        return sum(1 for _ in file)
+
 
 # Load input file with target hash
 def load_target(args):

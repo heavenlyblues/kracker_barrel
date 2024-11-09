@@ -90,9 +90,9 @@ def get_hash_flag(hash_string):
         hash_func_flag = "bcrypt"
     return hash_func_flag
 
-def crack_chunk(hash_string, chunk, status_flag):
+def crack_chunk(hash_string, chunk, flags):
     """Process a chunk of passwords to find a match for the target hash."""
-    if status_flag["found"]:
+    if flags["found"]:
         return False, 0  # Exit if the password has been found elsewhere
 
     hash_flag = get_hash_flag(hash_string)
@@ -105,7 +105,7 @@ def crack_chunk(hash_string, chunk, status_flag):
     chunk_count = 0
 
     for known_password in chunk:
-        if status_flag["found"]:
+        if flags["found"]:
             return False, chunk_count
         
         chunk_count += 1
@@ -116,27 +116,27 @@ def crack_chunk(hash_string, chunk, status_flag):
         try:
             # Check for Argon2
             if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                status_flag["found"] = True
+                flags["found"] = True
                 return known_password.decode(), chunk_count
 
             # Check for bcrypt
             elif hash_flag == "bcrypt":
                 if bcrypt.checkpw(known_password, target_hash):
-                    status_flag["found"] = True
+                    flags["found"] = True
                     return known_password.decode(), chunk_count
 
             # Check for Scrypt
             elif hash_flag == "scrypt":
                 target_hash, hash_object = create_hash_function(hash_string)
                 if hash_object.derive(known_password) == target_hash:
-                    status_flag["found"] = True
+                    flags["found"] = True
                     return known_password.decode(), chunk_count
 
             # Check for PBKDF2
             elif hash_flag == "pbkdf2":
                 target_hash, hash_object = create_hash_function(hash_string)
                 if hash_object.derive(known_password) == target_hash:
-                    status_flag["found"] = True
+                    flags["found"] = True
                     return known_password.decode(), chunk_count
 
         except Exception as e:
@@ -147,5 +147,5 @@ def crack_chunk(hash_string, chunk, status_flag):
 
 # Wrapper function to pass crack chunk function into 'executor.submit' method.
 # Allows for structured argument passing into attempt_crack.
-def crack_chunk_wrapper(hash_string, chunk, status_flag):
-    return crack_chunk(hash_string, chunk, status_flag)
+def crack_chunk_wrapper(hash_string, chunk, flags):
+    return crack_chunk(hash_string, chunk, flags)

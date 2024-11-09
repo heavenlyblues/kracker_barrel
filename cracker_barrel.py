@@ -13,7 +13,7 @@ COLOR = "\033[0;35m" # Purple
 GREEN = "\033[92m"  # Bright green text
 RESET = "\033[0m"
 
-def process_future_result(future, status_flag):
+def process_future_result(future, flags):
     """Process the result of a completed future."""
     try:
         # Attempt to retrieve the result of the future
@@ -21,7 +21,7 @@ def process_future_result(future, status_flag):
         # print("Future result retrieved successfully.")  # Debug statement
 
         if result:  # Check if a match was found
-            status_flag["found"] = True  # Set flag to stop other processes
+            flags["found"] = True  # Set flag to stop other processes
             print(f"\n{GREEN}Password match found -->> {RESET}{result}")
             return True, chunk_count  # Indicate that a match was found
 
@@ -47,11 +47,7 @@ def main():
 
     # Manager for multiprocessing, creating an Event "found_flag" for password match status.
     manager = Manager()
-    status_flag = manager.dict()
-    status_flag["found"] = False
-    status_flag["summary"] = False
-    status_flag["start"] = start_time
-    status_flag["end"] = None
+    flags = manager.dict(found=False, summary=False, start=start_time, end=None)
 
     total_count = 0  # Track the total count
     wordlist_length = get_wordlist_length(PASSWORD_LIST)
@@ -65,24 +61,24 @@ def main():
                           desc=f"{COLOR}Batch Processing{RESET}", total=total_batches, 
                           smoothing=1, ncols=100, leave=False, ascii=True
             ):
-            if status_flag["found"]:
+            if flags["found"]:
                 break
 
             # Submit each chunk to ProcessPoolExecutor directly
-            future = process_executor.submit(crack_chunk_wrapper, hash_string, chunk, status_flag)
+            future = process_executor.submit(crack_chunk_wrapper, hash_string, chunk, flags)
             futures.append(future)
 
             # If we have reached the limit of concurrent futures, wait for one to complete
             if len(futures) >= max_in_flight_futures:
                 # Wait for one of the futures to complete before adding more
                 for completed_future in as_completed(futures):
-                    match_found, chunk_count = process_future_result(completed_future, status_flag)
+                    match_found, chunk_count = process_future_result(completed_future, flags)
                     total_count += chunk_count # Accumulate counts
 
-                    if match_found and not status_flag["summary"]:
-                        status_flag["message"] = "Match found and program terminated.\n"
-                        status_flag["end"] = time.time()
-                        display_summary(cpu_workers, max_in_flight_futures, batch_size, status_flag, total_count)
+                    if match_found and not flags["summary"]:
+                        flags["message"] = "Match found and program terminated.\n"
+                        flags["end"] = time.time()
+                        display_summary(cpu_workers, max_in_flight_futures, batch_size, flags, total_count)
                         return  # Exit immediately if a match is found
 
                     # Clean up completed futures to maintain the limit
@@ -91,19 +87,19 @@ def main():
 
         # Handle any remaining futures after loading all chunks
         for future in as_completed(futures):
-            match_found, chunk_count = process_future_result(future, status_flag)
+            match_found, chunk_count = process_future_result(future, flags)
             total_count += chunk_count # Accumulate remaining futures counts
 
-            if match_found and not status_flag["summary"]:
-                status_flag["message"] = "Match found and program terminated.\n"
-                status_flag["end"] = time.time()
-                display_summary(cpu_workers, max_in_flight_futures, batch_size, status_flag, total_count)
+            if match_found and not flags["summary"]:
+                flags["message"] = "Match found and program terminated.\n"
+                flags["end"] = time.time()
+                display_summary(cpu_workers, max_in_flight_futures, batch_size, flags, total_count)
                 return
 
-    if not status_flag["found"]:  # No password match found.
-        status_flag["message"] = "No match found in word list. Program terminated.\n"
-        status_flag["end"] = time.time()
-        display_summary(cpu_workers, max_in_flight_futures, batch_size, status_flag, total_count)
+    if not flags["found"]:  # No password match found.
+        flags["message"] = "No match found in word list. Program terminated.\n"
+        flags["end"] = time.time()
+        display_summary(cpu_workers, max_in_flight_futures, batch_size, flags, total_count)
 
 if __name__ == "__main__":
     main()
