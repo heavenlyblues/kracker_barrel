@@ -5,6 +5,84 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+
+# Wrapper function to pass crack chunk function into 'executor.submit' method.
+# Allows for structured argument passing into attempt_crack.
+def crack_chunk_wrapper(hash_string, chunk, flags):
+    return crack_chunk(hash_string, chunk, flags)
+
+
+# Gets the flag for crack_chunk()
+def get_hash_flag(hash_string):
+    parts = hash_string.split("$")
+
+    if "argon" in parts[1]:
+        hash_func_flag = "argon"
+    elif "scrypt" in parts[1]:
+        hash_func_flag = "scrypt"
+    elif "pbkdf2" in parts[1]:
+        hash_func_flag = "pbkdf2"
+    else:
+        hash_func_flag = "bcrypt"
+    return hash_func_flag
+
+
+def crack_chunk(hash_string, chunk, flags):
+    """Process a chunk of passwords to find a match for the target hash."""
+    if flags["found"]:
+        return False, 0  # Exit if the password has been found elsewhere
+
+    hash_flag = get_hash_flag(hash_string)
+
+    if hash_flag == "argon":
+        target_hash, reusable_hash_object = create_hash_function(hash_string)
+    if hash_flag == "bcrypt":
+        target_hash = hash_string.encode()
+    
+    chunk_count = 0
+
+    for known_password in chunk:
+        if flags["found"]:
+            return False, chunk_count
+        
+        chunk_count += 1
+        
+        # if chunk_count % 1000 == 0:
+        #     print(f"Batch processing... {known_password.decode()}")
+        
+        try:
+            # Check for Argon2
+            if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
+                flags["found"] = True
+                return known_password.decode(), chunk_count
+
+            # Check for bcrypt
+            elif hash_flag == "bcrypt":
+                if bcrypt.checkpw(known_password, target_hash):
+                    flags["found"] = True
+                    return known_password.decode(), chunk_count
+
+            # Check for Scrypt
+            elif hash_flag == "scrypt":
+                target_hash, hash_object = create_hash_function(hash_string)
+                if hash_object.derive(known_password) == target_hash:
+                    flags["found"] = True
+                    return known_password.decode(), chunk_count
+
+            # Check for PBKDF2
+            elif hash_flag == "pbkdf2":
+                target_hash, hash_object = create_hash_function(hash_string)
+                if hash_object.derive(known_password) == target_hash:
+                    flags["found"] = True
+                    return known_password.decode(), chunk_count
+
+        except Exception as e:
+            # Handle exceptions without affecting count tracking
+            pass
+
+    return False, chunk_count
+
+
 def create_hash_function(hash_string):
     """Create a hashing object based on the specified hash algorithm from hash_string."""
     parts = hash_string.split("$")
@@ -75,77 +153,3 @@ def create_hash_function(hash_string):
 
     else:
         raise ValueError("Unsupported hash function")
-
-# Gets the flag for crack_chunk()
-def get_hash_flag(hash_string):
-    parts = hash_string.split("$")
-
-    if "argon" in parts[1]:
-        hash_func_flag = "argon"
-    elif "scrypt" in parts[1]:
-        hash_func_flag = "scrypt"
-    elif "pbkdf2" in parts[1]:
-        hash_func_flag = "pbkdf2"
-    else:
-        hash_func_flag = "bcrypt"
-    return hash_func_flag
-
-def crack_chunk(hash_string, chunk, flags):
-    """Process a chunk of passwords to find a match for the target hash."""
-    if flags["found"]:
-        return False, 0  # Exit if the password has been found elsewhere
-
-    hash_flag = get_hash_flag(hash_string)
-
-    if hash_flag == "argon":
-        target_hash, reusable_hash_object = create_hash_function(hash_string)
-    if hash_flag == "bcrypt":
-        target_hash = hash_string.encode()
-    
-    chunk_count = 0
-
-    for known_password in chunk:
-        if flags["found"]:
-            return False, chunk_count
-        
-        chunk_count += 1
-        
-        # if chunk_count % 1000 == 0:
-        #     print(f"Batch processing... {known_password.decode()}")
-        
-        try:
-            # Check for Argon2
-            if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                flags["found"] = True
-                return known_password.decode(), chunk_count
-
-            # Check for bcrypt
-            elif hash_flag == "bcrypt":
-                if bcrypt.checkpw(known_password, target_hash):
-                    flags["found"] = True
-                    return known_password.decode(), chunk_count
-
-            # Check for Scrypt
-            elif hash_flag == "scrypt":
-                target_hash, hash_object = create_hash_function(hash_string)
-                if hash_object.derive(known_password) == target_hash:
-                    flags["found"] = True
-                    return known_password.decode(), chunk_count
-
-            # Check for PBKDF2
-            elif hash_flag == "pbkdf2":
-                target_hash, hash_object = create_hash_function(hash_string)
-                if hash_object.derive(known_password) == target_hash:
-                    flags["found"] = True
-                    return known_password.decode(), chunk_count
-
-        except Exception as e:
-            # Handle exceptions without affecting count tracking
-            pass
-
-    return False, chunk_count
-
-# Wrapper function to pass crack chunk function into 'executor.submit' method.
-# Allows for structured argument passing into attempt_crack.
-def crack_chunk_wrapper(hash_string, chunk, flags):
-    return crack_chunk(hash_string, chunk, flags)

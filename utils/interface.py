@@ -1,22 +1,27 @@
 import argparse
 
-COLOR = "\033[0;35m"
-RESET = "\033[0m"
+P, G, R, Y, RESET = "\033[0;35m", "\033[92m", "\033[0;31m", "\033[0;33m","\033[0m"
+YES, NO = "\U0001F47D", "\U0001F61E"
 
-def display_summary(cpu_workers, max_in_flight_futures, batch_size, flags, total_count):
+def display_summary(summary, message, total_count, total_time, password=None):
     """Display a clean summary of the run."""
-    print(f"CPUs used: {cpu_workers}")
-    print(f"Max in flight futures: {max_in_flight_futures}")
-    print(f"Batch size: {batch_size}")
-    print(f"Total passwords attempted: {total_count}")
-    print(f"Total time: {flags['end'] - flags['start']:.1f} seconds")
-    print(f"{COLOR}{flags['message']}{RESET}")
-    flags['summary'] = True  # Set flag to avoid duplicate prints
+    if password != None:
+        print(f"\n\n{YES} {G}Password match found --> {RESET}{password}")
+    else:
+        print(f"\n{Y}No match found.{RESET} {NO}")
+    print("\n--- Summary ---")
+    print(f"{'Workers:':<25}{summary['workers']}")
+    print(f"{'Batch size:':<25}{summary['batch_size']}")
+    print(f"{'Batches:':<25}{summary['batches']}")
+    print(f"{'Items verified:':<25}{total_count}")
+    print(f"{'Total items on list:':<25}{summary['items']}")
+    print(f"{'Elapsed time:':<25}{total_time:.1f} seconds\n")
+    print(f"{P}{message}{RESET}")
 
 
 def get_command_line_args():
     parser = argparse.ArgumentParser(
-        description=f"{COLOR}KRACKER BARREL{RESET}"
+        description=f"{P}KRACKER BARREL{RESET}"
     )
     parser.add_argument(
         "input_file", 

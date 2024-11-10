@@ -1,5 +1,19 @@
 import sys
 
+
+# Load input file with target hash
+def load_target(args):
+    try:
+        with open(f"data/{args.input_file}","r") as file:
+            hash_string = file.readline().strip()
+
+    except FileNotFoundError:
+        print("Error: Target file not found.")
+        sys.exit(1)
+    
+    return hash_string
+
+
 # Generator function to load the wordlist in batches
 def load_wordlist(wordlist_path, batch_size):
     try:
@@ -22,14 +36,3 @@ def get_wordlist_length(wordlist_path):
         return sum(1 for _ in file)
 
 
-# Load input file with target hash
-def load_target(args):
-    try:
-        with open(f"data/{args.input_file}","r") as file:
-            hash_string = file.readline().strip()
-
-    except FileNotFoundError:
-        print("Error: Target file not found.")
-        sys.exit(1)
-    
-    return hash_string
