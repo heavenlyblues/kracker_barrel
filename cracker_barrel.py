@@ -6,9 +6,9 @@ from tqdm import tqdm
 
 from utils.file_utils import get_wordlist_length, load_wordlist, load_target
 from utils.hash_utils import crack_chunk_wrapper
-from utils.interface import get_command_line_args, display_summary, P, G, R, RESET
+from utils.interface import get_command_line_args, display_summary, PURPLE, RED, RESET
 
-PASSWORD_LIST = "refs/dictionary_eng.txt"
+PASSWORD_LIST = "refs/rockyou.txt"
 BATCH_SIZE = 1000
 
 
@@ -38,7 +38,7 @@ def futures_handler(future, flag, total_count, start_time, summary):
     if match_found:
         message = "Match found and program terminated."
         total_time = time.time() - start_time
-        display_summary(summary, message, total_count, total_time, password)
+        display_summary(flag, summary, message, total_count, total_time, password)
         return total_count, True  # Indicate match found
     return total_count, False  # Indicate no match found
 
@@ -70,7 +70,7 @@ def main():
             futures = []  # List to store 'future' instances of each password-checking task.
 
             for chunk in tqdm(load_wordlist(PASSWORD_LIST, batch_size), 
-                            desc=f"{P}Batch Processing{RESET}", total=total_batches, 
+                            desc=f"{PURPLE}Batch Processing{RESET}", total=total_batches, 
                             smoothing=1, ncols=100, leave=False, ascii=True):
                 
                 if flag["found"] == 0: break
@@ -99,17 +99,17 @@ def main():
 
     except KeyboardInterrupt:
         # Graceful exit on CTRL + C
-        print(f"\n{R}Process interrupted by user.")
+        flag["found"] = 2
         message = "Process interrupted. Partial summary displayed."
         total_time = time.time() - start_time
-        display_summary(summary, message, total_count, total_time)
+        display_summary(flag, summary, message, total_count, total_time)
 
     finally:
         # Final check if no match was found (when exiting naturally or interrupted)
-        if flag["found"] != 0:
+        if flag["found"] == 1:
             message = "No match found in word list. Program terminated."
             total_time = time.time() - start_time
-            display_summary(summary, message, total_count, total_time)
+            display_summary(flag, summary, message, total_count, total_time)
 
 if __name__ == "__main__":
     main()
