@@ -29,8 +29,10 @@ def get_hash_flag(hash_string):
 
 def crack_chunk(hash_string, chunk, flag):
     """Process a chunk of passwords to find a match for the target hash."""
-    if flag["found"]:
-        return False, 0  # Exit if the password has been found elsewhere
+    chunk_count = 0
+
+    if flag["found"] == 0:
+        return False, chunk_count  # Exit if the password has been found elsewhere
 
     hash_flag = get_hash_flag(hash_string)
 
@@ -39,10 +41,9 @@ def crack_chunk(hash_string, chunk, flag):
     if hash_flag == "bcrypt":
         target_hash = hash_string.encode()
     
-    chunk_count = 0
 
     for known_password in chunk:
-        if flag["found"]:
+        if flag["found"] == 0:
             return False, chunk_count
         
         chunk_count += 1
@@ -53,27 +54,27 @@ def crack_chunk(hash_string, chunk, flag):
         try:
             # Check for Argon2
             if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                flag["found"] = True
+                flag["found"] = 0
                 return known_password.decode(), chunk_count
 
             # Check for bcrypt
             elif hash_flag == "bcrypt":
                 if bcrypt.checkpw(known_password, target_hash):
-                    flag["found"] = True
+                    flag["found"] = 0
                     return known_password.decode(), chunk_count
 
             # Check for Scrypt
             elif hash_flag == "scrypt":
                 target_hash, hash_object = create_hash_function(hash_string)
                 if hash_object.derive(known_password) == target_hash:
-                    flag["found"] = True
+                    flag["found"] = 0
                     return known_password.decode(), chunk_count
 
             # Check for PBKDF2
             elif hash_flag == "pbkdf2":
                 target_hash, hash_object = create_hash_function(hash_string)
                 if hash_object.derive(known_password) == target_hash:
-                    flag["found"] = True
+                    flag["found"] = 0
                     return known_password.decode(), chunk_count
 
         except Exception as e:
