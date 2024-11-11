@@ -3,22 +3,22 @@ import argparse
 PURPLE, GREEN, RED, YELLOW, RESET = "\033[0;35m", "\033[92m", "\033[0;31m", "\033[0;33m","\033[0m"
 YES, NO, STOP = "\U0001F47D", "\U0001F61E", "\U0001F6A8"
 
-def display_summary(flag, summary, message, total_count, total_time, password=None):
+def display_exit_summary(found_flag, exit_summary, exit_message, total_count, total_time, cracked_password=None):
     """Display a clean summary of the run."""
-    if flag["found"] == 0:
-        print(f"\n\n{YES} {GREEN}Password match found --> {RESET}{password}")
-    elif flag["found"] == 1:
+    if found_flag["found"] == 0:
+        print(f"\n\n{YES} {GREEN}Password match found --> {RESET}{cracked_password}")
+    elif found_flag["found"] == 1:
         print(f"\n{YELLOW}No match found.{RESET} {NO}")
-    elif flag["found"] == 2:
+    elif found_flag["found"] == 2:
         print(f"\n{STOP} {RED}Process interrupted by user.{RESET}")
     print("\n--- Summary ---")
-    print(f"{'Workers:':<25}{summary['workers']}")
-    print(f"{'Batch size:':<25}{summary['batch_size']}")
-    print(f"{'Batches:':<25}{summary['batches']}")
+    print(f"{'Workers:':<25}{exit_summary['workers']}")
+    print(f"{'Batch size:':<25}{exit_summary['batch_size']}")
+    print(f"{'Batches:':<25}{exit_summary['batches']}")
     print(f"{'Items verified:':<25}{total_count}")
-    print(f"{'Total items on list:':<25}{summary['items']}")
+    print(f"{'Total items on list:':<25}{exit_summary['items']}")
     print(f"{'Elapsed time:':<25}{total_time:.1f} seconds\n")
-    print(f"{PURPLE}{message}{RESET}")
+    print(f"{PURPLE}{exit_message}{RESET}")
 
 
 def get_command_line_args():

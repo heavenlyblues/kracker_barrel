@@ -3,31 +3,33 @@ import time
 from multiprocessing import Manager
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
-from utils.file_utils import get_wordlist_length, load_wordlist, load_target
+from utils.file_utils import get_number_of_passwords, yield_password_batches, load_target_hash
 from utils.hash_utils import crack_chunk_wrapper
-from utils.interface import get_command_line_args, display_summary, PURPLE, RESET
+from utils.interface import get_command_line_args, display_exit_summary, PURPLE, RESET
 
 
 class Cracker:
-    def __init__(self, password_list, batch_size):
-        self.password_list = password_list
+    def __init__(self, path_to_passwords, batch_size):
+        self.path_to_passwords = path_to_passwords
         self.batch_size = batch_size
         self.manager = Manager()
-        self.flag = self.manager.dict(found=1)  # Global flag for stopping on match
+        self.found_flag = self.manager.dict(found=1)  # Global found_flag for stopping on match
         self.total_count = 0  # Track the total count
+        self.message = ""
         self.start_time = time.time()
         self.args = get_command_line_args()
-        self.hash_string = load_target(self.args)
-        self.summary = self.initialize_summary()
+        self.hash_digest_with_metadata = load_target_hash(self.args)
+        self.exit_summary = self.initialize_exit_summary()
     
-    def initialize_summary(self):
-        wordlist_length = get_wordlist_length(self.password_list)
-        total_batches = (wordlist_length // self.batch_size) + 1
+    def initialize_exit_summary(self):
+        number_of_passwords = get_number_of_passwords(self.path_to_passwords)
+        total_batches = (number_of_passwords // self.batch_size) + 1
         return {
             "workers": os.cpu_count(),
             "batches": total_batches,
             "batch_size": self.batch_size,
-            "items": wordlist_length
+            "items": number_of_passwords,
+            "message": self.message
         }
 
     def process_future_result(self, future):
@@ -35,7 +37,7 @@ class Cracker:
         try:
             result, chunk_count = future.result()
             if result:
-                self.flag["found"] = 0
+                self.found_flag["found"] = 0
                 return True, chunk_count, result
         except Exception as e:
             import traceback
@@ -44,30 +46,30 @@ class Cracker:
         return False, chunk_count, None
 
     def futures_handler(self, future):
-        match_found, chunk_count, password = self.process_future_result(future)
+        match_found, chunk_count, cracked_password = self.process_future_result(future)
         self.total_count += chunk_count
 
         if match_found:
-            message = "Match found and program terminated."
+            self.message = "Match found and program terminated."
             total_time = time.time() - self.start_time
-            display_summary(self.flag, self.summary, message, self.total_count, total_time, password)
+            display_exit_summary(self.found_flag, self.exit_summary, self.message, self.total_count, total_time, cracked_password)
             return True
         return False
 
     def run(self):
         try:
-            with ProcessPoolExecutor(max_workers=self.summary["workers"]) as executor:
+            with ProcessPoolExecutor(max_workers=self.exit_summary["workers"]) as executor:
                 futures = []
-                for chunk in tqdm(load_wordlist(self.password_list, self.batch_size), 
+                for chunk in tqdm(yield_password_batches(self.path_to_passwords, self.batch_size), 
                                   desc=f"{PURPLE}Batch Processing{RESET}", 
-                                  total=self.summary["batches"], smoothing=1, ncols=100, leave=False, ascii=True):
-                    if self.flag["found"] == 0:
+                                  total=self.exit_summary["batches"], smoothing=1, ncols=100, leave=False, ascii=True):
+                    if self.found_flag["found"] == 0:
                         break
 
-                    future = executor.submit(crack_chunk_wrapper, self.hash_string, chunk, self.flag)
+                    future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
                     futures.append(future)
 
-                    if len(futures) >= self.summary["workers"] * 2:
+                    if len(futures) >= self.exit_summary["workers"] * 2:
                         for future in as_completed(futures):
                             if self.futures_handler(future):
                                 return  # Exit if a match is found
@@ -79,13 +81,13 @@ class Cracker:
                         return
 
         except KeyboardInterrupt:
-            self.flag["found"] = 2
-            message = "Process interrupted. Partial summary displayed."
+            self.found_flag["found"] = 2
+            self.message = "Process interrupted. Partial exit_summary displayed."
             total_time = time.time() - self.start_time
-            display_summary(self.flag, self.summary, message, self.total_count, total_time)
+            display_exit_summary(self.found_flag, self.exit_summary, self.message, self.total_count, total_time)
         
         finally:
-            if self.flag["found"] == 1:
-                message = "No match found in word list. Program terminated."
+            if self.found_flag["found"] == 1:
+                self.message = "No match found in word list. Program terminated."
                 total_time = time.time() - self.start_time
-                display_summary(self.flag, self.summary, message, self.total_count, total_time)
+                display_exit_summary(self.found_flag, self.exit_summary, self.message, self.total_count, total_time)
