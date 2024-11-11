@@ -1,156 +1,156 @@
-import base64
 from argon2 import PasswordHasher
-import bcrypt
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+import bcrypt
+import base64
 
 
-# Wrapper function to pass crack chunk function into 'executor.submit' method.
-# Allows for structured argument passing into attempt_crack.
-def crack_chunk_wrapper(hash_string, chunk, flag):
-    return crack_chunk(hash_string, chunk, flag)
+class HashHandler:
+    def __init__(self, hash_string):
+        self.hash_string = hash_string
+        self.target_hash = None
+        self.hash_object = None
 
+    def parse_hash_string(self):
+        raise NotImplementedError("Subclasses must implement this method.")
 
-# Gets the flag for crack_chunk()
-def get_hash_flag(hash_string):
-    parts = hash_string.split("$")
-
-    if "argon" in parts[1]:
-        hash_func_flag = "argon"
-    elif "scrypt" in parts[1]:
-        hash_func_flag = "scrypt"
-    elif "pbkdf2" in parts[1]:
-        hash_func_flag = "pbkdf2"
-    else:
-        hash_func_flag = "bcrypt"
-    return hash_func_flag
-
-
-def crack_chunk(hash_string, chunk, flag):
-    """Process a chunk of passwords to find a match for the target hash."""
-    chunk_count = 0
-
-    if flag["found"] == 0:
-        return False, chunk_count  # Exit if the password has been found elsewhere
-
-    hash_flag = get_hash_flag(hash_string)
-
-    if hash_flag == "argon":
-        target_hash, reusable_hash_object = create_hash_function(hash_string)
-    if hash_flag == "bcrypt":
-        target_hash = hash_string.encode()
+    def verify(self, password):
+        raise NotImplementedError("Subclasses must implement this method.")
     
+    @classmethod
+    def get_hash_flag(cls, hash_string):
+        parts = hash_string.split("$")
 
-    for known_password in chunk:
-        if flag["found"] == 0:
-            return False, chunk_count
+        if "argon" in parts[1]:
+            return "argon"
+        elif "scrypt" in parts[1]:
+            return "scrypt"
+        elif "pbkdf2" in parts[1]:
+            return "pbkdf2"
+        elif "2b" in parts[1]:
+            return "bcrypt"
+        else:
+            raise ValueError("Unsupported hash type")
         
-        chunk_count += 1
-        
-        # if chunk_count % 1000 == 0:
-        #     print(f"Batch processing... {known_password.decode()}")
-        
-        try:
-            # Check for Argon2
-            if hash_flag == "argon" and reusable_hash_object.verify(target_hash, known_password):
-                flag["found"] = 0
-                return known_password.decode(), chunk_count
 
-            # Check for bcrypt
-            elif hash_flag == "bcrypt":
-                if bcrypt.checkpw(known_password, target_hash):
-                    flag["found"] = 0
-                    return known_password.decode(), chunk_count
-
-            # Check for Scrypt
-            elif hash_flag == "scrypt":
-                target_hash, hash_object = create_hash_function(hash_string)
-                if hash_object.derive(known_password) == target_hash:
-                    flag["found"] = 0
-                    return known_password.decode(), chunk_count
-
-            # Check for PBKDF2
-            elif hash_flag == "pbkdf2":
-                target_hash, hash_object = create_hash_function(hash_string)
-                if hash_object.derive(known_password) == target_hash:
-                    flag["found"] = 0
-                    return known_password.decode(), chunk_count
-
-        except Exception as e:
-            # Handle exceptions without affecting count tracking
-            pass
-
-    return False, chunk_count
-
-
-def create_hash_function(hash_string):
-    """Create a hashing object based on the specified hash algorithm from hash_string."""
-    parts = hash_string.split("$")
-
-    if "argon" in parts[1]:
-        # Expected format: $argon2id$v=19$m=1024,t=1,p=1$salt$hash
+class Argon2Handler(HashHandler):
+    def parse_hash_string(self):
+        parts = self.hash_string.split("$")
+        # Parsing logic specific to Argon2
         if len(parts) != 6 or parts[0] != "":
             raise ValueError("Invalid Argon2 hash format")
+        
+        version = int(parts[2].split("=")[1])
+        param_string = parts[3]
+        memory_cost = int(param_string.split(",")[0].split("=")[1])
+        time_cost = int(param_string.split(",")[1].split("=")[1])
+        parallelism = int(param_string.split(",")[2].split("=")[1])
 
+        self.target_hash = self.hash_string
+        self.hash_object = PasswordHasher(time_cost=time_cost, memory_cost=memory_cost, parallelism=parallelism)
+
+    def verify(self, password):
         try:
-            # Parse the version
-            version = int(parts[2].split("=")[1])
+            return self.hash_object.verify(self.target_hash, password)
+        except Exception:
+            return False
 
-            # Parse memory, time, and parallelism values individually
-            param_string = parts[3]  # m=1024,t=1,p=1
-            memory_cost = int(param_string.split(",")[0].split("=")[1])  # m=1024
-            time_cost = int(param_string.split(",")[1].split("=")[1])  # t=1
-            parallelism = int(param_string.split(",")[2].split("=")[1])  # p=1
 
-            # Decode the salt and target hash, ensuring padding
-            target_hash = hash_string
-
-        except (IndexError, ValueError) as e:
-            raise ValueError(f"Error parsing Argon2 hash string: {e}")
-
-        # Return the target_hash and PasswordHasher instance
-        return target_hash, PasswordHasher(
-            time_cost=time_cost, memory_cost=memory_cost, parallelism=parallelism
-        )
-
-    elif "scrypt" in parts[1]:
-        # Expected format: $scrypt$ln=16384,r=8,p=1$salt$hash
+class ScryptHandler(HashHandler):
+    def parse_hash_string(self):
+        parts = self.hash_string.split("$")
         if len(parts) != 5 or parts[0] != "":
             raise ValueError("Invalid scrypt hash format")
 
-        # Parse parameters
         n = int(parts[2].split("=")[1].split(",")[0])
         r = int(parts[2].split(",")[1].split("=")[1])
         p = int(parts[2].split(",")[2].split("=")[1])
         salt_b64 = parts[3]
         hash_b64 = parts[4]
 
-        # Decode salt and target hash
-        salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
-        target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
+        self.target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
+        self.salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
+        self.n = n
+        self.r = r
+        self.p = p
 
-        # Return target_hash and scrypt KDF instance
-        return target_hash, Scrypt(salt=salt, length=32, n=n, r=r, p=p)
+    def verify(self, password):
+        # Create a new Scrypt instance for each verification
+        hash_object = Scrypt(salt=self.salt, length=32, n=self.n, r=self.r, p=self.p)
+        try:
+            return hash_object.derive(password) == self.target_hash
+        except Exception:
+            return False
 
-    elif "pbkdf2" in parts[1]:
-        # Expected format: $pbkdf2_sha512$iterations=210000$salt$hash
+
+class PBKDF2Handler(HashHandler):
+    def parse_hash_string(self):
+        parts = self.hash_string.split("$")
         if len(parts) != 5 or parts[0] != "":
             raise ValueError("Invalid PBKDF2 hash format")
 
-        # Parse parameters
         iterations = int(parts[2].split("=")[1])
         salt_b64 = parts[3]
         hash_b64 = parts[4]
 
-        # Decode salt and target hash
-        salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
-        target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
+        self.target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
+        self.salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
+        self.iterations = iterations
 
-        # Return target_hash and PBKDF2 KDF instance
-        return target_hash, PBKDF2HMAC(
-            algorithm=hashes.SHA512(), length=32, salt=salt, iterations=iterations
+    def verify(self, password):
+        # Create a new PBKDF2 instance for each verification
+        hash_object = PBKDF2HMAC(
+            algorithm=hashes.SHA512(), length=32, salt=self.salt, iterations=self.iterations
         )
+        try:
+            return hash_object.derive(password) == self.target_hash
+        except Exception:
+            return False
 
+
+class BcryptHandler(HashHandler):
+    def parse_hash_string(self):
+        self.target_hash = self.hash_string.encode()
+
+    def verify(self, password):
+        try:
+            return bcrypt.checkpw(password, self.target_hash)
+        except Exception:
+            return False
+        
+
+def get_hash_handler(hash_string):
+    flag = HashHandler.get_hash_flag(hash_string)
+    if flag == "argon":
+        return Argon2Handler(hash_string)
+    elif flag == "scrypt":
+        return ScryptHandler(hash_string)
+    elif flag == "pbkdf2":
+        return PBKDF2Handler(hash_string)
+    elif flag == "bcrypt":
+        return BcryptHandler(hash_string)
     else:
-        raise ValueError("Unsupported hash function")
+        raise ValueError("Unsupported hash type")
+
+def crack_chunk_wrapper(hash_string, chunk, flag):
+    return crack_chunk(hash_string, chunk, flag)
+
+def crack_chunk(hash_string, chunk, flag):
+    chunk_count = 0
+    if flag["found"] == 0:
+        return False, chunk_count
+
+    hash_handler = get_hash_handler(hash_string)
+    hash_handler.parse_hash_string()
+
+    for known_password in chunk:
+        if flag["found"] == 0:
+            return False, chunk_count
+
+        chunk_count += 1
+        if hash_handler.verify(known_password):
+            flag["found"] = 0
+            return known_password.decode(), chunk_count
+
+    return False, chunk_count
