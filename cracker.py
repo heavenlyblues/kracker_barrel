@@ -32,21 +32,21 @@ class Cracker:
             "message": self.message
         }
 
-    def process_future_result(self, future):
+    def process_task_result(self, task_result):
         """Process the result of a completed future."""
         try:
-            result, chunk_count = future.result()
+            result, chunk_count = task_result.result()
             if result:
                 self.found_flag["found"] = 0
                 return True, chunk_count, result
         except Exception as e:
             import traceback
-            print(f"Error in process_future_result: {e}")
+            print(f"Error in process_task_result: {e}")
             traceback.print_exc()
         return False, chunk_count, None
 
-    def futures_handler(self, future):
-        match_found, chunk_count, cracked_password = self.process_future_result(future)
+    def handle_task_result(self, task_result):
+        match_found, chunk_count, cracked_password = self.process_task_result(task_result)
         self.total_count += chunk_count
 
         if match_found:
@@ -59,25 +59,29 @@ class Cracker:
     def run(self):
         try:
             with ProcessPoolExecutor(max_workers=self.exit_summary["workers"]) as executor:
-                futures = []
+                password_batch_tasks = []
+                # Submit password batches as tasks to the executor
                 for chunk in tqdm(yield_password_batches(self.path_to_passwords, self.batch_size), 
-                                  desc=f"{PURPLE}Batch Processing{RESET}", 
-                                  total=self.exit_summary["batches"], smoothing=1, ncols=100, leave=False, ascii=True):
+                                desc=f"{PURPLE}Batch Processing{RESET}", 
+                                total=self.exit_summary["batches"], smoothing=1, ncols=100, leave=False, ascii=True):
                     if self.found_flag["found"] == 0:
                         break
+                    
+                    # Submit each password batch for processing
+                    task_result = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
+                    password_batch_tasks.append(task_result)
 
-                    future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
-                    futures.append(future)
-
-                    if len(futures) >= self.exit_summary["workers"] * 2:
-                        for future in as_completed(futures):
-                            if self.futures_handler(future):
+                    # Handle completed tasks and clean up finished futures
+                    if len(password_batch_tasks) >= self.exit_summary["workers"] * 2:
+                        for task_result in as_completed(password_batch_tasks):
+                            if self.handle_task_result(task_result):
                                 return  # Exit if a match is found
-                            futures = [f for f in futures if not f.done()]
+                            password_batch_tasks = [f for f in password_batch_tasks if not f.done()]
                             break
 
-                for future in as_completed(futures):
-                    if self.futures_handler(future):
+                # Final pass to process any remaining tasks
+                for task_result in as_completed(password_batch_tasks):
+                    if self.handle_task_result(task_result):
                         return
 
         except KeyboardInterrupt:
