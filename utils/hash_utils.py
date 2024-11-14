@@ -118,7 +118,7 @@ class BcryptHandler(HashHandler):
             return bcrypt.checkpw(potential_password_match, self.target_hash_to_crack)
         except Exception:
             return False
-        
+
 
 def get_hash_handler(hash_digest_with_metadata):
     type_of_hash = HashHandler.get_hash_type(hash_digest_with_metadata)
@@ -133,8 +133,10 @@ def get_hash_handler(hash_digest_with_metadata):
     else:
         raise ValueError("Unsupported hash type")
 
+
 def crack_chunk_wrapper(hash_digest_with_metadata, chunk, found_flag):
     return crack_chunk(hash_digest_with_metadata, chunk, found_flag)
+
 
 def crack_chunk(hash_digest_with_metadata, chunk, found_flag):
     chunk_count = 0

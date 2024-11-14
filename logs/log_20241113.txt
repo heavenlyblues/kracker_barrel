@@ -1,0 +1,125 @@
+         Scan completed: 20241113_223348         
+-------------------------------------------------
+
+------------------------- Summary -------------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          44802
+Total items on list:     143091
+Elapsed time:            5.1 seconds
+Match found and program terminated.
+-------------------------------------------------
+-------------------------------------------------
+         Scan completed: 20241113_223456         
+-------------------------------------------------
+
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          46802
+Total items on list:     143091
+Elapsed time:            5.9 seconds
+Match found and program terminated.
+-------------------------------------------------
+-------------------------------------------------
+         
+Scan completed: 20241113_223602        
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          42802
+Total items on list:     143091
+Elapsed time:            4.7 seconds
+Match found and program terminated.
+-------------------------------------------------
+-------------------------------------------------
+         Scan completed: 20241113_223804         
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.6 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+         Scan completed: 20241113_223908         
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          42802
+Total items on list:     143091
+Elapsed time:            4.6 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+         Scan completed: 20241113_224830         
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          39802
+Total items on list:     143091
+Elapsed time:            5.4 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+         Scan completed: 20241113_224900         
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.6 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+         Scan completed: 20241113_225318         
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          44802
+Total items on list:     143091
+Elapsed time:            4.7 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+         Scan completed: 20241113_225405         
+-------------------------------------------------
+-------------------- Summary --------------------
+Password match found --> flapjack
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.6 seconds
+Match found and program terminated.
+-------------------------------------------------
+

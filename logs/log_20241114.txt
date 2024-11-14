@@ -1,0 +1,135 @@
+-------------------------------------------------
+    Summary - scan completed: 20241114_004338    
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_engWorkers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.4 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+    Summary - scan completed: 20241114_004642    
+-------------------------------------------------
+Password match found --> None
+File scanned:            dictionary_engWorkers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          4.817104816436768
+Total items on list:     143091
+-------------------------------------------------
+    Summary - scan completed: 20241114_004850    
+-------------------------------------------------
+Password match found --> None
+File scanned:            dictionary_engWorkers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          4.387801885604858
+Total items on list:     143091
+-------------------------------------------------
+    Summary - scan completed: 20241114_005009    
+-------------------------------------------------
+Password match found --> None
+File scanned:            dictionary_engWorkers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          4.202951908111572
+Total items on list:     143091
+-------------------------------------------------
+    Summary - scan completed: 20241114_005022    
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_engWorkers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+    Summary - scan completed: 20241114_010001    
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_engWorkers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.462416887283325 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+    Summary - scan completed: 20241114_010114    
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_eng
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.6 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+   Summary - scan completed: 20241114_01:02:09   
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_eng
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          44562
+Total items on list:     143091
+Elapsed time:            4.7 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+  Summary - scan completed: 2024-11-14 01:03.53  
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_eng
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          40802
+Total items on list:     143091
+Elapsed time:            4.9 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+       Scan completed: 2024-11-14 01:06.31       
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:                 dictionary_eng
+Workers:                      8
+Batch size:                   1000
+Batches:                      144
+Items verified:               40802
+Total items on list:          143091
+Elapsed time:                 4.7 seconds
+Match found and program terminated.
+-------------------------------------------------
+
+-------------------------------------------------
+       Scan completed: 2024-11-14 01:07.39       
+-------------------------------------------------
+Password match found --> flapjack
+File scanned:            dictionary_eng
+Workers:                 8
+Batch size:              1000
+Batches:                 144
+Items verified:          43400
+Items on list:           143091
+Elapsed time:            4.8 seconds
+Match found and program terminated.
+-------------------------------------------------
+

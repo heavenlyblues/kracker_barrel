@@ -1,10 +1,10 @@
 import sys
-
+from pathlib import Path
 
 # Load input file with target hash
-def load_target_hash(args):
+def load_target_hash(target_filepath):
     try:
-        with open(f"data/{args.input_file}","r") as file:
+        with target_filepath.open("r") as file:
             hash_digest_with_metadata = file.readline().strip()
 
     except FileNotFoundError:
@@ -17,7 +17,7 @@ def load_target_hash(args):
 # Generator function to load the wordlist in batches
 def yield_password_batches(path_to_passwords, batch_size):
     try:
-        with open(path_to_passwords, "r", encoding="latin-1") as file:
+        with path_to_passwords.open("r", encoding="latin-1") as file:
             batch = []
             for line in file:
                 batch.append(line.strip().encode())
@@ -32,5 +32,5 @@ def yield_password_batches(path_to_passwords, batch_size):
 
 
 def get_number_of_passwords(path_to_passwords):
-    with open(path_to_passwords, "r", encoding="latin-1") as file:
+    with path_to_passwords.open("r", encoding="latin-1") as file:
         return sum(1 for _ in file)
