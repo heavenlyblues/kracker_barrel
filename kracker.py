@@ -38,21 +38,23 @@ class Cracker:
             result, chunk_count = task_result.result()
             if result:
                 self.found_flag["found"] = 0
-                return True, chunk_count, result
+                self.summary_log["password"] = result
+                return True, chunk_count
         except Exception as e:
             import traceback
             print(f"Error in process_task_result: {e}")
+            result, chunk_count = False, 0 
             traceback.print_exc()
-        return False, chunk_count, None
+        return False, chunk_count
 
     def handle_task_result(self, task_result):
-        match_found, chunk_count, cracked_password = self.process_task_result(task_result)
+        match_found, chunk_count = self.process_task_result(task_result)
         self.summary_log["total_count"] += chunk_count
 
         if match_found:
             self.summary_log["message"] = "Match found and program terminated."
             self.summary_log["elapsed_time"] = time.time() - self.start_time
-            display_summary(self.found_flag, self.summary_log, cracked_password)
+            display_summary(self.found_flag, self.summary_log)
             return True
         return False
 

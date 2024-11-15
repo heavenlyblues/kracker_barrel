@@ -10,7 +10,6 @@ YES, NO, STOP = "\U0001F47D", "\U0001F61E", "\U0001F6A8"
 def display_summary(
     found_flag, 
     summary_log, 
-    cracked_password=None, 
     log_file=f"log_{datetime.now().strftime('%Y%m%d')}.txt"
 ):
     """Display a clean summary of the run and write to a log file."""
@@ -39,7 +38,7 @@ def display_summary(
         
         # Build the summary
         if found_flag["found"] == 0:
-            result_message = f"Password match found --> {cracked_password}"
+            result_message = f"Password match found --> {summary_log['password']}"
             print(f"\n\n{YES} {GREEN}{result_message}{RESET}")
             log.write(f"{result_message}\n")
         elif found_flag["found"] == 1:

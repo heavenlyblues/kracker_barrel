@@ -6,6 +6,7 @@ cryptography==43.0.3
 git-filter-repo==2.45.0
 passlib==1.7.4
 pycparser==2.22
+pycryptodome==3.21.0
 scrypt==0.8.27
 tdqm==0.0.1
 tqdm==4.67.0

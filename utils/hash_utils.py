@@ -4,6 +4,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import bcrypt
 import base64
+import hashlib
+from Crypto.Hash import MD4
 
 
 class HashHandler:
@@ -17,22 +19,45 @@ class HashHandler:
 
     def verify(self, potential_password_match):
         raise NotImplementedError("Subclasses must implement this method.")
-    
+
+    def hex_to_bytes(self, hash_string):
+        """
+        Utility method to convert a hexadecimal hash string to bytes.
+        """
+        try:
+            return bytes.fromhex(hash_string)
+        except ValueError:
+            raise ValueError("Invalid hash format (not hexadecimal)")
+
     @classmethod
     def get_hash_type(cls, hash_digest_with_metadata):
         parts = hash_digest_with_metadata.split("$")
 
-        if "argon" in parts[1]:
-            return "argon"
-        elif "scrypt" in parts[1]:
-            return "scrypt"
-        elif "pbkdf2" in parts[1]:
-            return "pbkdf2"
-        elif "2b" in parts[1]:
-            return "bcrypt"
+        if len(parts) > 1:
+            if "argon" in parts[1]:
+                return "argon"
+            elif "scrypt" in parts[1]:
+                return "scrypt"
+            elif "pbkdf2" in parts[1]:
+                return "pbkdf2"
+            elif "2b" in parts[1]:
+                return "bcrypt"
+            elif "ntlm" in parts[1]:
+                return "ntlm"
+            elif "md5" in parts[1]:
+                return "md5"
         else:
-            raise ValueError("Unsupported hash type")
-        
+            # Check for plain hashes based on length and hexadecimal validation
+            try:
+                if len(hash_digest_with_metadata) == 64 and int(hash_digest_with_metadata, 16):
+                    return "sha256"
+                elif len(hash_digest_with_metadata) == 128 and int(hash_digest_with_metadata, 16):
+                    return "sha512"
+            except ValueError:
+                pass
+
+        raise ValueError("Unsupported hash type")
+
 
 class Argon2Handler(HashHandler):
     def parse_hash_digest_with_metadata(self):
@@ -120,18 +145,138 @@ class BcryptHandler(HashHandler):
             return False
 
 
+class NTLMHandler(HashHandler):
+    def parse_hash_digest_with_metadata(self):
+        """
+        Parse the NTLM hash metadata to extract the hash to crack.
+        """
+        # Example NTLM format: $NTLM$<32-character hash>
+        parts = self.hash_digest_with_metadata.split("$")
+
+        # Check if it follows the NTLM format
+        if len(parts) == 3 and len(parts[2]) == 32:
+            # Proceed with the hash
+            self.target_hash_to_crack = self.hex_to_bytes(parts[2])
+        else:
+            raise ValueError(f"Invalid NTLM hash format: {self.hash_digest_with_metadata}")
+
+    def verify(self, potential_password_match):
+        """
+        Verify the password by calculating its NTLM hash and comparing it.
+        """
+        try:
+            # Create the MD4 hash object
+            password = potential_password_match.decode()
+            ntlm_hash = MD4.new()
+            ntlm_hash.update(password.encode('utf-16le'))
+            
+            # Compare the computed NTLM hash with the target hash
+            computed_hash = ntlm_hash.digest()
+            return computed_hash == self.target_hash_to_crack
+        except Exception as e:
+            print(f"Error during NTLM hash verification: {e}")
+            return False
+        
+
+class MD5Handler(HashHandler):
+    def parse_hash_digest_with_metadata(self):
+        """
+        Parse the MD5 hash metadata to extract the hash to crack.
+        """
+        parts = self.hash_digest_with_metadata.split("$")
+
+        # Check if it follows the MD5 format
+        if len(parts) == 3 and len(parts[2]) == 32:
+            # Proceed with the hash
+            self.target_hash_to_crack = self.hex_to_bytes(parts[2])
+        else:
+            raise ValueError(f"Invalid NTLM hash format: {self.hash_digest_with_metadata}")
+
+    def verify(self, potential_password_match):
+        try:
+            password = potential_password_match.decode()
+            md5_hash = hashlib.md5(password.encode('utf-8')).digest()
+            return md5_hash == self.target_hash_to_crack
+        except Exception as e:
+            print(f"Error during MD5 hash verification: {e}")
+            return False
+
+
+class SHA256Handler(HashHandler):
+    def parse_hash_digest_with_metadata(self):
+        """
+        Parse the SHA-256 hash metadata to extract the hash to crack.
+        """
+        # SHA-256 hashes are 64-character hexadecimal strings
+        if len(self.hash_digest_with_metadata) != 64:
+            raise ValueError("Invalid SHA-256 hash format")
+        
+        self.target_hash_to_crack = self.hex_to_bytes(self.hash_digest_with_metadata)
+
+    def verify(self, potential_password_match):
+        """
+        Verify the password by calculating its SHA-256 hash and comparing it.
+        """
+        try:
+            password = potential_password_match.decode()
+            sha256_hash = hashlib.sha256(password.encode('utf-8')).digest()
+            return sha256_hash == self.target_hash_to_crack
+        except Exception as e:
+            print(f"Error during SHA-256 hash verification: {e}")
+            return False
+
+
+class SHA512Handler(HashHandler):
+    def parse_hash_digest_with_metadata(self):
+        """
+        Parse the SHA-512 hash metadata to extract the hash to crack.
+        """
+        # SHA-512 hashes are 128-character hexadecimal strings
+        if len(self.hash_digest_with_metadata) != 128:
+            raise ValueError("Invalid SHA-512 hash format")
+        
+        self.target_hash_to_crack = self.hex_to_bytes(self.hash_digest_with_metadata)
+
+    def verify(self, potential_password_match):
+        """
+        Verify the password by calculating its SHA-512 hash and comparing it.
+        """
+        try:
+            password = potential_password_match.decode()
+            sha512_hash = hashlib.sha512(password.encode('utf-8')).digest()
+            return sha512_hash == self.target_hash_to_crack
+        except Exception as e:
+            print(f"Error during SHA-512 hash verification: {e}")
+            return False
+
+
 def get_hash_handler(hash_digest_with_metadata):
-    type_of_hash = HashHandler.get_hash_type(hash_digest_with_metadata)
-    if type_of_hash == "argon":
-        return Argon2Handler(hash_digest_with_metadata)
-    elif type_of_hash == "scrypt":
-        return ScryptHandler(hash_digest_with_metadata)
-    elif type_of_hash == "pbkdf2":
-        return PBKDF2Handler(hash_digest_with_metadata)
-    elif type_of_hash == "bcrypt":
-        return BcryptHandler(hash_digest_with_metadata)
-    else:
-        raise ValueError("Unsupported hash type")
+    hash_handlers = {
+        "argon": lambda x: Argon2Handler(x),
+        "scrypt": lambda x: ScryptHandler(x),
+        "pbkdf2": lambda x: PBKDF2Handler(x),
+        "bcrypt": lambda x: BcryptHandler(x),
+        "ntlm": lambda x: NTLMHandler(x),
+        "md5": lambda x: MD5Handler(x),
+        "sha256": lambda x: SHA256Handler(x), 
+        "sha512": lambda x: SHA512Handler(x)
+    }
+    try:
+        hash_type = HashHandler.get_hash_type(hash_digest_with_metadata)
+        handler = hash_handlers.get(hash_type)
+        
+        if not handler:
+            raise ValueError(f"No handler found for hash type: {hash_type}")
+
+        return handler(hash_digest_with_metadata)
+   
+    except ValueError as e:
+        raise ValueError(f"Error determining hash type or handler: {e}")
+
+    # CLEAN AF but not as efficient
+    # for key, handler in hash_handlers.items():
+    #     if key == hash_type:
+    #         return handler(hash_digest_with_metadata)
 
 
 def crack_chunk_wrapper(hash_digest_with_metadata, chunk, found_flag):
