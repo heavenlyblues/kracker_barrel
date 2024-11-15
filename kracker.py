@@ -9,7 +9,7 @@ from utils.hash_utils import crack_chunk_wrapper
 from utils.interface import display_summary, PURPLE, RESET
 
 
-class Cracker:
+class Kracker:
     def __init__(self, target_file, path_to_passwords, batch_size):
         self.path_to_passwords = path_to_passwords
         self.batch_size = batch_size

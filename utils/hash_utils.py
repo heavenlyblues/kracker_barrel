@@ -102,9 +102,9 @@ class ScryptHandler(HashHandler):
 
     def verify(self, potential_password_match):
         # Create a new Scrypt instance for each verification
-        hash_processor = Scrypt(salt=self.salt, length=32, n=self.n, r=self.r, p=self.p)
+        scrypt_hash = Scrypt(salt=self.salt, length=32, n=self.n, r=self.r, p=self.p)
         try:
-            return hash_processor.derive(potential_password_match) == self.target_hash_to_crack
+            return scrypt_hash.derive(potential_password_match) == self.target_hash_to_crack
         except Exception:
             return False
 
@@ -125,11 +125,11 @@ class PBKDF2Handler(HashHandler):
 
     def verify(self, potential_password_match):
         # Create a new PBKDF2 instance for each verification
-        hash_processor = PBKDF2HMAC(
+        pbkdf2_hash = PBKDF2HMAC(
             algorithm=hashes.SHA512(), length=32, salt=self.salt, iterations=self.iterations
         )
         try:
-            return hash_processor.derive(potential_password_match) == self.target_hash_to_crack
+            return pbkdf2_hash.derive(potential_password_match) == self.target_hash_to_crack
         except Exception:
             return False
 
@@ -288,7 +288,7 @@ def crack_chunk(hash_digest_with_metadata, chunk, found_flag):
     if found_flag["found"] == 0:
         return False, chunk_count
 
-    hash_handler = get_hash_handler(hash_digest_with_metadata)
+    hash_handler = get_hash_handler(hash_digest_with_metadata[0])
     hash_handler.parse_hash_digest_with_metadata()
 
     for potential_password_match in chunk:

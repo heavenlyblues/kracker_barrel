@@ -5,8 +5,16 @@ from pathlib import Path
 def load_target_hash(target_filepath):
     try:
         with target_filepath.open("r") as file:
-            hash_digest_with_metadata = file.readline().strip()
-
+            lines = file.readlines()
+            if len(lines) == 0:
+                print("Empty file. Nothing to read.")
+                return None
+            elif len(lines) == 1:
+                hash_digest_with_metadata = lines[0].strip()  # Single hash
+                return [hash_digest_with_metadata]  # Return as a list
+            else:
+                multihash_digest = [line.strip() for line in lines]  # Multiple hashes
+                return multihash_digest
     except FileNotFoundError:
         print("Error: Target file not found.")
         sys.exit(1)

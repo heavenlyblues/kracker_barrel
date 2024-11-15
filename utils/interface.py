@@ -82,6 +82,12 @@ def get_command_line_args():
         type=str, 
         help="Enter the hashed password file to crack."
     )
+    # parser.add_argument(
+    #     "directory", 
+    #     type=str, 
+    #     help="Enter the hashed password file to crack."
+    # )
+
 
     args = parser.parse_args()
     return args
