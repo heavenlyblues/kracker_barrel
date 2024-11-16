@@ -1,18 +1,21 @@
-import argparse
 from datetime import datetime
 from pathlib import Path
+import sys, time
 
 
-PURPLE, GREEN, RED, YELLOW, RESET = "\033[0;35m", "\033[92m", "\033[0;31m", "\033[0;33m","\033[0m"
-YES, NO, STOP = "\U0001F47D", "\U0001F61E", "\U0001F6A8"
+PURPLE, RED, YELLOW = "\033[0;35m", "\033[0;31m", "\033[0;33m"
+LIGHT_YELLOW, BLINK, RESET = "\033[93m", "\033[5m", "\033[0m"
 
 
-def get_command_line_args():
-    parser = argparse.ArgumentParser(description=f"{PURPLE}KRACKER BARREL{RESET}")
-    parser.add_argument("input_file", type=str, help="Enter the hashed password file to crack.")
-
-    args = parser.parse_args()
-    return args
+def blinking_text(message, duration=3):
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        sys.stdout.write(f"{BLINK}{LIGHT_YELLOW}{message}{RESET}\r")
+        sys.stdout.flush()
+        time.sleep(0.5)
+        sys.stdout.write(" " * len(message) + "\r")  # Clear the line
+        sys.stdout.flush()
+        time.sleep(0.5)
 
 
 def display_summary(
@@ -45,19 +48,20 @@ def display_summary(
         log.write("-" * 49 + "\n")
         
         # Build the summary
-        print("\n")
         if found_flag["found"] > 0:
             for recovered_password in summary_log['pwned']:
-                result_message = f"Password matches found --> {recovered_password}"
-                print(f"{YES} {GREEN}{result_message}{RESET}")
+                result_message = f"Password match found --> {recovered_password}"
+                # print(f"{YES} {GREEN}{result_message}{RESET}")
                 log.write(f"{result_message}\n")
+        
         elif found_flag["found"] == 0:
             result_message = "No match found."
-            print(f"\n{YELLOW}{result_message}{RESET} {NO}")
+            print(f"\n{YELLOW}{result_message}{RESET}")
             log.write(f"{result_message}\n")
+        
         elif found_flag["found"] == -1:
             result_message = "Process interrupted by user."
-            print(f"\n{STOP} {RED}{result_message}{RESET}")
+            print(f"\n{RED}{result_message}{RESET}")
             log.write(f"{result_message}\n")
         
         # Write the summary to the log file
@@ -72,7 +76,8 @@ def display_summary(
         log.write("-" * 49 + "\n\n")
     
     # Display the summary on the console
-    print("\n" + "-" * 15 + " Summary " + "-" * 15)
+    print()
+    print("-" * 15 + " Summary " + "-" * 15)
     print(f"{'File scanned:':<25}{summary_log['file_scanned']}")
     print(f"{'Workers:':<25}{summary_log['workers']}")
     print(f"{'Batch size:':<25}{summary_log['batch_size']}")

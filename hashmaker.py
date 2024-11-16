@@ -87,13 +87,13 @@ class HashMaker():
     # Function to hash a password using SHA-256
     def compute_sha256(self):
         sha256_hash = hashlib.sha256(self.password.encode('utf-8')).hexdigest()
-        return sha256_hash
+        return f"$sha256${sha256_hash}"
 
 
     # Function to hash a password using SHA-512
     def compute_sha512(self):
         sha512_hash = hashlib.sha512(self.password.encode('utf-8')).hexdigest()
-        return sha512_hash
+        return f"$sha512${sha512_hash}"
 
 
     def _save_to_file(self, hashed):
@@ -130,14 +130,15 @@ def get_command_line_args():
     )
 
     parser.add_argument("-t", "--test_mode", help="Test mode", action="store_true")
-    parser.add_argument("output_file", help="Specify output file name", type=str)
+    parser.add_argument("--output_file", help="Specify output file name", type=str, default=None)
 
     return parser.parse_args()
+
 
 def main():
     args = get_command_line_args()
     
-    password = input("Password for testing: ")
+    password = input("Password for testing: ").strip()
 
     hash_maker = HashMaker(password, args.output_file)
 
@@ -169,10 +170,14 @@ def main():
     selected_operation = args.operation
     hashed = commands[selected_operation]()
 
-    hash_maker._save_to_file(hashed)
     print(f"Test password: {password}")
     print(f"Hashed using: {selected_operation}")
-    print(f"Saved to: {args.output_file}")
+    print(f"Hash: {hashed}")
+
+    if args.output_file is not None:
+        hash_maker._save_to_file(hashed)
+        print(f"Saved to: {args.output_file}")
+
     
 if __name__ == "__main__":
     main()
