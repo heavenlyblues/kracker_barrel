@@ -1,7 +1,7 @@
 import os
 import time
 from pathlib import Path
-from multiprocessing import Manager
+from multiprocessing import Manager, shared_memory
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 from utils.file_utils import get_number_of_passwords, yield_password_batches, load_target_hash
