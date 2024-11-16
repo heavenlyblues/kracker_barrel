@@ -11,7 +11,7 @@ from Crypto.Hash import MD4
 class HashHandler:
     def __init__(self, hash_digest_with_metadata):
         self.hash_digest_with_metadata = hash_digest_with_metadata
-        self.target_hash_to_crack = None
+        self.target_hash_to_crack = []
         self.hash_processor = None
 
     def parse_hash_digest_with_metadata(self):
@@ -31,7 +31,7 @@ class HashHandler:
 
     @classmethod
     def get_hash_type(cls, hash_digest_with_metadata):
-        parts = hash_digest_with_metadata.split("$")
+        parts = hash_digest_with_metadata[0].split("$")
 
         if len(parts) > 1:
             if "argon" in parts[1]:
@@ -151,18 +151,19 @@ class NTLMHandler(HashHandler):
         Parse the NTLM hash metadata to extract the hash to crack.
         """
         # Example NTLM format: $NTLM$<32-character hash>
-        parts = self.hash_digest_with_metadata.split("$")
+        for hash_digest in self.hash_digest_with_metadata:
+            parts = hash_digest.split("$")
 
-        # Check if it follows the NTLM format
-        if len(parts) == 3 and len(parts[2]) == 32:
-            # Proceed with the hash
-            self.target_hash_to_crack = self.hex_to_bytes(parts[2])
-        else:
-            raise ValueError(f"Invalid NTLM hash format: {self.hash_digest_with_metadata}")
+            # Check if it follows the NTLM format
+            if len(parts) == 3 and len(parts[2]) == 32:
+                # Proceed with the hash
+                self.target_hash_to_crack.append(self.hex_to_bytes(parts[2]))
+            else:
+                raise ValueError(f"Invalid NTLM hash format: {self.hash_digest_with_metadata}")
 
     def verify(self, potential_password_match):
         """
-        Verify the password by calculating its NTLM hash and comparing it.
+        Verify the password by calculating its NTLM hash and comparing it with the target hashes.
         """
         try:
             # Create the MD4 hash object
@@ -170,12 +171,17 @@ class NTLMHandler(HashHandler):
             ntlm_hash = MD4.new()
             ntlm_hash.update(password.encode('utf-16le'))
             
-            # Compare the computed NTLM hash with the target hash
+            # Compare the computed NTLM hash with each hash in the target list
             computed_hash = ntlm_hash.digest()
-            return computed_hash == self.target_hash_to_crack
+            # Check if computed_hash matches any in the list
+            if computed_hash in self.target_hash_to_crack:
+                return password  # Return the matched password
+            
+            return None  # Return None if no match found
+        
         except Exception as e:
             print(f"Error during NTLM hash verification: {e}")
-            return False
+            return None
         
 
 class MD5Handler(HashHandler):
@@ -285,19 +291,19 @@ def crack_chunk_wrapper(hash_digest_with_metadata, chunk, found_flag):
 
 def crack_chunk(hash_digest_with_metadata, chunk, found_flag):
     chunk_count = 0
-    if found_flag["found"] == 0:
+    if found_flag["found"] >= found_flag["goal"]:
         return False, chunk_count
 
-    hash_handler = get_hash_handler(hash_digest_with_metadata[0])
+    hash_handler = get_hash_handler(hash_digest_with_metadata)
     hash_handler.parse_hash_digest_with_metadata()
 
     for potential_password_match in chunk:
-        if found_flag["found"] == 0:
+        if found_flag["found"] >= found_flag["goal"]:
             return False, chunk_count
 
         chunk_count += 1
-        if hash_handler.verify(potential_password_match):
-            found_flag["found"] = 0
-            return potential_password_match.decode(), chunk_count
+        matched_passwords = hash_handler.verify(potential_password_match)
+        if matched_passwords is not None:
+            return matched_passwords, chunk_count
 
     return False, chunk_count

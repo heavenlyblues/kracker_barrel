@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+
 # Load input file with target hash
 def load_target_hash(target_filepath):
     try:
@@ -20,6 +21,7 @@ def load_target_hash(target_filepath):
         sys.exit(1)
     
     return hash_digest_with_metadata
+
 
 # Function to scan and process hashes from a directory
 def scan_hashes_in_directory(directory_path):

@@ -7,6 +7,14 @@ PURPLE, GREEN, RED, YELLOW, RESET = "\033[0;35m", "\033[92m", "\033[0;31m", "\03
 YES, NO, STOP = "\U0001F47D", "\U0001F61E", "\U0001F6A8"
 
 
+def get_command_line_args():
+    parser = argparse.ArgumentParser(description=f"{PURPLE}KRACKER BARREL{RESET}")
+    parser.add_argument("input_file", type=str, help="Enter the hashed password file to crack.")
+
+    args = parser.parse_args()
+    return args
+
+
 def display_summary(
     found_flag, 
     summary_log, 
@@ -37,15 +45,17 @@ def display_summary(
         log.write("-" * 49 + "\n")
         
         # Build the summary
-        if found_flag["found"] == 0:
-            result_message = f"Password match found --> {summary_log['password']}"
-            print(f"\n\n{YES} {GREEN}{result_message}{RESET}")
-            log.write(f"{result_message}\n")
-        elif found_flag["found"] == 1:
+        print("\n")
+        if found_flag["found"] > 0:
+            for recovered_password in summary_log['pwned']:
+                result_message = f"Password matches found --> {recovered_password}"
+                print(f"{YES} {GREEN}{result_message}{RESET}")
+                log.write(f"{result_message}\n")
+        elif found_flag["found"] == 0:
             result_message = "No match found."
             print(f"\n{YELLOW}{result_message}{RESET} {NO}")
             log.write(f"{result_message}\n")
-        elif found_flag["found"] == 2:
+        elif found_flag["found"] == -1:
             result_message = "Process interrupted by user."
             print(f"\n{STOP} {RED}{result_message}{RESET}")
             log.write(f"{result_message}\n")
@@ -62,7 +72,7 @@ def display_summary(
         log.write("-" * 49 + "\n\n")
     
     # Display the summary on the console
-    print("\n" + "-" * 15 + " Summary " + "-" * 15 + "\n")
+    print("\n" + "-" * 15 + " Summary " + "-" * 15)
     print(f"{'File scanned:':<25}{summary_log['file_scanned']}")
     print(f"{'Workers:':<25}{summary_log['workers']}")
     print(f"{'Batch size:':<25}{summary_log['batch_size']}")
@@ -71,23 +81,3 @@ def display_summary(
     print(f"{'Items on list:':<25}{summary_log['items']}")
     print(f"{'Elapsed time:':<25}{summary_log['elapsed_time']:.1f} seconds\n")
     print(f"{PURPLE}{summary_log['message']}{RESET}")
-
-
-def get_command_line_args():
-    parser = argparse.ArgumentParser(
-        description=f"{PURPLE}KRACKER BARREL{RESET}"
-    )
-    parser.add_argument(
-        "input_file", 
-        type=str, 
-        help="Enter the hashed password file to crack."
-    )
-    # parser.add_argument(
-    #     "directory", 
-    #     type=str, 
-    #     help="Enter the hashed password file to crack."
-    # )
-
-
-    args = parser.parse_args()
-    return args
