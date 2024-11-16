@@ -5,8 +5,8 @@ from utils.interface import get_command_line_args
 if __name__ == "__main__":
     args = get_command_line_args()
     
-    path_to_passwords = Path("refs") / "dictionary_eng.txt" 
+    path_to_passwords = Path("refs") / "rockyou.txt" 
 
-    cracker = Kracker(args.input_file, path_to_passwords, batch_size=5000)
+    cracker = Kracker(args.input_file, path_to_passwords, batch_size=10000)
 
     cracker.run()

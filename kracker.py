@@ -63,8 +63,9 @@ class Kracker:
             with ProcessPoolExecutor(max_workers=self.summary_log["workers"]) as executor:
                 batch_generator = yield_password_batches(self.path_to_passwords, self.batch_size)
                 futures = []  # Queue to hold active Future objects
+                preload_limit = self.summary_log["workers"] * 3  # Preload twice the number of workers
 
-                        # Initialize tqdm with total number of batches
+                # Initialize tqdm with total number of batches
                 with tqdm(
                     desc=f"{PURPLE}Batch Processing{RESET}",
                     total=self.summary_log["batches"],
@@ -73,15 +74,16 @@ class Kracker:
                     leave=False,
                     ascii=True,
                 ) as pbar:
-                    # Pre-fill the pool with initial tasks
-                    for _ in range(self.summary_log["workers"] * 2):
+
+                    # Preload initial batches into the queue
+                    print("Preloading initial batches...")
+                    for _ in range(preload_limit):
                         try:
                             chunk = next(batch_generator)
                             future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
                             futures.append(future)
-                            # print(f"Added to futures: {future}, type: {type(future)}")
                         except StopIteration:
-                            break  # No more batches to load
+                            break  # No more batches to preload
 
                     # Process futures dynamically as they complete
                     while futures:
@@ -98,14 +100,14 @@ class Kracker:
                                     self.final_summary()
                                     return  # Exit immediately
 
-                                # Load and submit a new batch, if available
-                                try:
-                                    chunk = next(batch_generator)
-                                    new_future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
-                                    futures.append(new_future)
-                                    # print(f"Added new future: {new_future}, type: {type(new_future)}")
-                                except StopIteration:
-                                    pass  # No more batches to load
+                                # Dynamically preload new batches as space frees up
+                                if len(futures) < preload_limit:
+                                    try:
+                                        chunk = next(batch_generator)
+                                        new_future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
+                                        futures.append(new_future)
+                                    except StopIteration:
+                                        pass  # No more batches to load
                             except Exception as e:
                                 print(f"Error processing future: {e}")
                             finally:
