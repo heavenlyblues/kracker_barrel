@@ -61,19 +61,56 @@ class Kracker:
         """Main loop to process password batches and handle matches."""
         try:
             with ProcessPoolExecutor(max_workers=self.summary_log["workers"]) as executor:
-                # Submit password batches as tasks to the executor
-                for chunk in tqdm(yield_password_batches(self.path_to_passwords, self.batch_size), 
-                                desc=f"{PURPLE}Batch Processing{RESET}", 
-                                total=self.summary_log["batches"], smoothing=1, ncols=100, leave=False, ascii=True):
-                    
-                    # Submit each password batch for processing
-                    task_result = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
-                    self.process_task_result(task_result)
-                    
-                    # Stop if the required number of matches is found
-                    if self.found_flag["found"] == self.found_flag["goal"]:
-                        self.final_summary()
-                        break
+                batch_generator = yield_password_batches(self.path_to_passwords, self.batch_size)
+                futures = []  # Queue to hold active Future objects
+
+                        # Initialize tqdm with total number of batches
+                with tqdm(
+                    desc=f"{PURPLE}Batch Processing{RESET}",
+                    total=self.summary_log["batches"],
+                    smoothing=1,
+                    ncols=100,
+                    leave=False,
+                    ascii=True,
+                ) as pbar:
+                    # Pre-fill the pool with initial tasks
+                    for _ in range(self.summary_log["workers"] * 2):
+                        try:
+                            chunk = next(batch_generator)
+                            future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
+                            futures.append(future)
+                            # print(f"Added to futures: {future}, type: {type(future)}")
+                        except StopIteration:
+                            break  # No more batches to load
+
+                    # Process futures dynamically as they complete
+                    while futures:
+                        for future in as_completed(futures):
+                            try:
+                                # Send the Future to process_task_result
+                                self.process_task_result(future)
+
+                                # Update the progress bar
+                                pbar.update(1)
+
+                                # Stop if the required number of matches is found
+                                if self.found_flag["found"] == self.found_flag["goal"]:
+                                    self.final_summary()
+                                    return  # Exit immediately
+
+                                # Load and submit a new batch, if available
+                                try:
+                                    chunk = next(batch_generator)
+                                    new_future = executor.submit(crack_chunk_wrapper, self.hash_digest_with_metadata, chunk, self.found_flag)
+                                    futures.append(new_future)
+                                    # print(f"Added new future: {new_future}, type: {type(new_future)}")
+                                except StopIteration:
+                                    pass  # No more batches to load
+                            except Exception as e:
+                                print(f"Error processing future: {e}")
+                            finally:
+                                # Remove completed future
+                                futures.remove(future)
 
         except KeyboardInterrupt:
             self.found_flag["found"] = -1
