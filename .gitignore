@@ -4,6 +4,7 @@
 /logs
 /gpu
 /tests
+/data
 
 # Ignore virtual environments
 .venv/
