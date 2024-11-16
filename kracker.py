@@ -40,9 +40,10 @@ class Kracker:
         """Process the result of a completed future."""
         try:
             pwned_pwd, chunk_count = task_result.result()
+            self.summary_log["total_count"] += chunk_count
+
             if pwned_pwd:
                 self.summary_log["pwned"].append(pwned_pwd)  # Append all matched passwords
-                self.summary_log["total_count"] += chunk_count
 
                 # Increment found_flag every time a match is found
                 self.found_flag["found"] += 1
@@ -64,19 +65,18 @@ class Kracker:
                 batch_generator = yield_password_batches(self.path_to_passwords, self.batch_size)
                 futures = []  # Queue to hold active Future objects
                 preload_limit = self.summary_log["workers"] * 3  # Preload twice the number of workers
-
+                                    # Preload initial batches into the queue
+                print("Preloading initial batches...")
                 # Initialize tqdm with total number of batches
                 with tqdm(
                     desc=f"{PURPLE}Batch Processing{RESET}",
                     total=self.summary_log["batches"],
                     smoothing=1,
                     ncols=100,
-                    leave=False,
+                    leave=True,
                     ascii=True,
                 ) as pbar:
 
-                    # Preload initial batches into the queue
-                    print("Preloading initial batches...")
                     for _ in range(preload_limit):
                         try:
                             chunk = next(batch_generator)
@@ -113,6 +113,7 @@ class Kracker:
                             finally:
                                 # Remove completed future
                                 futures.remove(future)
+            self.final_summary()
 
         except KeyboardInterrupt:
             self.found_flag["found"] = -1

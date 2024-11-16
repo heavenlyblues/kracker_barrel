@@ -136,13 +136,21 @@ class PBKDF2Handler(HashHandler):
 
 class BcryptHandler(HashHandler):
     def parse_hash_digest_with_metadata(self):
-        self.target_hash_to_crack = self.hash_digest_with_metadata.encode()
+        """Prepare the hashes for comparison."""
+        self.target_hash_to_crack = [
+            hash_digest.encode("utf-8") for hash_digest in self.hash_digest_with_metadata
+        ]
 
     def verify(self, potential_password_match):
+        """Verify if the password matches any target hash."""
         try:
-            return bcrypt.checkpw(potential_password_match, self.target_hash_to_crack)
-        except Exception:
-            return False
+            for hash_digest in self.target_hash_to_crack:
+                if bcrypt.checkpw(potential_password_match, hash_digest):
+                    return potential_password_match.decode()  # Return on first match
+            return None  # No matches found after checking all hashes
+        except bcrypt.error as e:
+            print(f"Error during bcrypt verification: {e}")
+            return None
 
 
 class NTLMHandler(HashHandler):
