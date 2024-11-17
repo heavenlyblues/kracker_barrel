@@ -3,23 +3,25 @@ from multiprocessing import Manager
 import os, time
 from pathlib import Path
 from tqdm import tqdm
+from modules.hash_handler import crack_chunk_wrapper
 from utils.file_io import get_number_of_passwords, yield_password_batches, load_target_hash
-from utils.hash_handler import crack_chunk_wrapper
-from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, RESET
+from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, BLINK, DIM, RESET
 
 
 class Kracker:
     def __init__(self, args):
-        self.operation = args.operation
+        self.operation = args.operation # dict, brut, mask, rule
+        self.hash_type = args.hash_type # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.target_file = Path ("data") / args.target_file
-        self.hash_type = args.hash_type
-        self.path_to_passwords = Path("refs") / "rockyou.txt"
-        self.batch_size = 2000
+        self.path_to_passwords = Path("refs") / args.password_list
+        self.batch_size = 2000  # Adjust batch size for performance
+
         self.manager = Manager()
         self.start_time = time.time()
-        self.hash_digest_with_metadata = load_target_hash(self.target_file)
-        self.goal = len(self.hash_digest_with_metadata)
+        self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
+        self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
+
         self.summary_log = self.initialize_summary_log()
 
 
@@ -27,9 +29,9 @@ class Kracker:
         return (
             f"\n{PURPLE}Kracker Configuration:{RESET}\n"
             f"  Operation: {self.operation}\n"
-            f"  Input file: {self.target_file}\n"
+            f"  Target: {self.target_file}\n"
             f"  Hash type: {self.hash_type}\n"
-            f"  Path to passwords: {self.path_to_passwords}\n"
+            f"  Password list: {self.path_to_passwords}\n"
             f"  Batch size: {self.batch_size}\n"
         )
 
@@ -39,8 +41,9 @@ class Kracker:
         total_batches = (number_of_passwords // self.batch_size) + 1
         return {
             "operation": self.operation,
+            "input_file": self.target_file,
             "hash_type": self.hash_type,
-            "file_scanned": str(self.path_to_passwords.stem),
+            "file_scanned": self.path_to_passwords,
             "workers": os.cpu_count(),
             "batches": total_batches,
             "batch_size": self.batch_size,
@@ -62,7 +65,7 @@ class Kracker:
                 print(f"{LIGHT_YELLOW}Starting preloading...{RESET}")
                 blinking_text("Preloading batches...", duration=5)
                 print("Done!\n")
-
+                print(f"{DIM}Scanning...{RESET}")
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
                           total=self.summary_log["batches"], smoothing=1, 

@@ -1,0 +1,57 @@
+## Standard Dictionary Operation ##
+operation: dict 
+hash_type: bcrypt
+target_file: bcrypt.txt
+password_list: dictionary_eng.txt
+
+
+# Configuration for Cracker Barrel Operations
+# Uncomment the relevant section for the desired operation and fill in the values.
+
+# ----- DICTIONARY ATTACK -----
+# operation: dict
+# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
+# target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
+# password_list: <dictionary.txt>      # File with potential passwords (place in "refs/")
+
+# ----- BRUTE FORCE ATTACK -----
+# operation: brut
+# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
+# target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
+# charset: abcdef12345               # Charset for brute force (default: alphanumeric)
+# min_length: 6                      # Minimum password length
+# max_length: 8                      # Maximum password length
+
+# ----- MASK-BASED ATTACK -----
+# operation: mask
+# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
+# target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
+# mask: "?u?l?d"                     # Mask pattern (e.g., ?u = uppercase, ?l = lowercase, ?d = digit)
+
+# ----- RULE-BASED ATTACK -----
+# operation: rule
+# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
+# target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
+# rules: <rules.txt>                 # File with transformation rules
+# wordlist1: <wordlist1.txt>         # Primary wordlist (place in "refs/")
+# wordlist2: <wordlist2.txt>         # Secondary wordlist (optional, place in "refs/")
+
+# Examples:
+# operation: brut
+# hash_type: argon
+# target_file: argon_hashes.txt
+# charset: abcdef12345
+# min_length: 6
+# max_length: 8
+
+# operation: mask
+# hash_type: scrypt
+# target_file: scrypt_hashes.txt
+# mask: "?u?u?l?l?d"
+
+# operation: rule
+# hash_type: ntlm
+# target_file: ntlm_hashes.txt
+# rules: complex_rules.txt
+# wordlist1: common_passwords.txt
+# wordlist2: rare_passwords.txt

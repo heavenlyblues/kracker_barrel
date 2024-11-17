@@ -5,6 +5,7 @@
 /gpu
 /tests
 /data
+/tools
 
 # Ignore virtual environments
 .venv/

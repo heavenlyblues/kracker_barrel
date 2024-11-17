@@ -3,8 +3,8 @@ from pathlib import Path
 import sys, time
 
 
-PURPLE, RED, YELLOW = "\033[0;35m", "\033[0;31m", "\033[0;33m"
-LIGHT_YELLOW, BLINK, RESET = "\033[93m", "\033[5m", "\033[0m"
+PURPLE, RED, YELLOW, GREEN = "\033[0;35m", "\033[0;31m", "\033[0;33m", "\033[32m"
+LIGHT_YELLOW, BLINK, DIM, RESET = "\033[93m", "\033[5m", "\033[2m", "\033[0m"
 
 
 def blinking_text(message, duration=3):
@@ -65,10 +65,13 @@ def display_summary(
             log.write(f"{result_message}\n")
         
         # Write the summary to the log file
+        log.write(f"{'Operation:':<25}{summary_log['operation']}\n")
+        log.write(f"{'Input file:':<25}{summary_log['input_file']}\n")
+        log.write(f"{'Hash type:':<25}{summary_log['hash_type']}\n")
         log.write(f"{'File scanned:':<25}{summary_log['file_scanned']}\n")
         log.write(f"{'Workers:':<25}{summary_log['workers']}\n")
-        log.write(f"{'Batch size:':<25}{summary_log['batch_size']}\n")
         log.write(f"{'Batches:':<25}{summary_log['batches']}\n")
+        log.write(f"{'Batch size:':<25}{summary_log['batch_size']}\n")
         log.write(f"{'Items verified:':<25}{summary_log['total_count']}\n")
         log.write(f"{'Items on list:':<25}{summary_log['items']}\n")
         log.write(f"{'Elapsed time:':<25}{summary_log['elapsed_time']:.1f} seconds\n")
@@ -80,8 +83,8 @@ def display_summary(
     print("-" * 15 + " Summary " + "-" * 15)
     print(f"{'File scanned:':<25}{summary_log['file_scanned']}")
     print(f"{'Workers:':<25}{summary_log['workers']}")
-    print(f"{'Batch size:':<25}{summary_log['batch_size']}")
     print(f"{'Batches:':<25}{summary_log['batches']}")
+    print(f"{'Batch size:':<25}{summary_log['batch_size']}")
     print(f"{'Items verified:':<25}{summary_log['total_count']}")
     print(f"{'Items on list:':<25}{summary_log['items']}")
     print(f"{'Elapsed time:':<25}{summary_log['elapsed_time']:.1f} seconds\n")
