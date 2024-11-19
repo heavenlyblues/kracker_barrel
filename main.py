@@ -1,4 +1,4 @@
-from modules.kracker import Kracker
+from core.kracker import Kracker
 from utils.cli import load_args, load_config
 
 

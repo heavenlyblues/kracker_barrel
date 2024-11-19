@@ -3,8 +3,10 @@ from multiprocessing import Manager
 import os, time
 from pathlib import Path
 from tqdm import tqdm
-from modules.hash_handler import crack_chunk_wrapper
-from utils.file_io import get_number_of_passwords, yield_password_batches, load_target_hash
+from core.hash_handler import crack_chunk_wrapper
+from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
+from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
+from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
 from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, BLINK, DIM, RESET
 
 
@@ -13,14 +15,17 @@ class Kracker:
         self.operation = args.operation # dict, brut, mask, rule
         self.hash_type = args.hash_type # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.target_file = Path ("data") / args.target_file
-        self.path_to_passwords = Path("refs") / args.password_list
+        self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
         self.batch_size = 2000  # Adjust batch size for performance
+        self.mask_pattern = args.pattern # Mask-based attack
+        self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
 
         self.manager = Manager()
         self.start_time = time.time()
         self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
+        self.batch_generator = None
 
         self.summary_log = self.initialize_summary_log()
 
@@ -37,8 +42,18 @@ class Kracker:
 
 
     def initialize_summary_log(self):
-        number_of_passwords = get_number_of_passwords(self.path_to_passwords)
+        if self.operation == "dict":
+            number_of_passwords = get_number_of_passwords(self.path_to_passwords)
+        elif self.operation == "brut":
+            number_of_passwords = get_brute_count(self.brute_settings)
+        elif self.operation == "mask":
+            number_of_passwords = get_mask_count(self.pattern)
+        elif self.operation == "rule":
+            number_of_passwords = 1
+
+
         total_batches = (number_of_passwords // self.batch_size) + 1
+        
         return {
             "operation": self.operation,
             "input_file": self.target_file,
@@ -53,12 +68,26 @@ class Kracker:
         }
 
 
+    def initialize_batch_generator(self):
+        if self.operation == "dict":
+            self.batch_generator = yield_dictionary_batches(self.path_to_passwords, self.batch_size)
+        elif self.operation == "brut":
+            generator = generate_brute_candidates(self.brute_settings)
+            self.batch_generator = yield_brute_batches(generator, self.batch_size)
+        elif self.operation == "mask":
+            generator = generate_mask_candidates(self.mask_pattern)
+            self.batch_generator = yield_maskbased_batches(generator, self.batch_size)
+        elif self.operation == "rule":
+            pass
+
+
     def run(self):
         """Main loop to process password batches and handle matches."""
         print(self)  # Calls the __str__ method to print the configuration
         try:
             with ProcessPoolExecutor(max_workers=self.summary_log["workers"]) as executor:
-                batch_generator = yield_password_batches(self.path_to_passwords, self.batch_size)
+                self.initialize_batch_generator()
+
                 futures = []  # Queue to hold active Future objects
                 preload_limit = self.summary_log["workers"] * 3
 
@@ -74,7 +103,7 @@ class Kracker:
                     #  Submit batches to crack chunk and collect results in futures
                     for _ in range(preload_limit):
                         try:
-                            chunk = next(batch_generator)
+                            chunk = next(self.batch_generator)
                             future = executor.submit(crack_chunk_wrapper, self.hash_type, 
                                                      self.hash_digest_with_metadata, chunk, 
                                                      self.found_flag)
@@ -98,7 +127,7 @@ class Kracker:
                                 # Dynamically preload new batches as space frees up
                                 if len(futures) < preload_limit:
                                     try:
-                                        chunk = next(batch_generator)
+                                        chunk = next(self.batch_generator)
                                         new_future = executor.submit(crack_chunk_wrapper, self.hash_type, 
                                                                      self.hash_digest_with_metadata, chunk, 
                                                                      self.found_flag)

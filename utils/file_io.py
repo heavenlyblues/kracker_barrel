@@ -24,7 +24,7 @@ def load_target_hash(target_filepath):
 
 
 # Generator function to load the wordlist in batches
-def yield_password_batches(path_to_passwords, batch_size):
+def yield_dictionary_batches(path_to_passwords, batch_size):
     try:
         with path_to_passwords.open("r", encoding="latin-1") as file:
             batch = []

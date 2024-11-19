@@ -1,0 +1,6 @@
+APPEND 123       # Append "123" to the word
+PREPEND admin    # Prepend "admin" to the word
+CAPITALIZE       # Capitalize the first letter
+REVERSE          # Reverse the word
+LEETSPEAK        # Substitute characters (a->@, o->0, etc.)
+APPEND !#$       # Append special characters

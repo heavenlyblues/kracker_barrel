@@ -229,13 +229,13 @@ class NTLMHandler(HashHandler):
             else:
                 raise ValueError(f"Invalid NTLM hash format: {self.hash_digest_with_metadata}")
 
-    def verify(self, potential_password_match):
+    def verify(self, potential_match):
         """
         Verify the password by calculating its NTLM hash and comparing it with the target hashes.
         """
         try:
             # Create the MD4 hash object
-            password = potential_password_match.decode()
+            password = potential_match.decode() if isinstance(potential_match, bytes) else potential_match
             ntlm_hash = MD4.new()
             ntlm_hash.update(password.encode('utf-16le'))
             

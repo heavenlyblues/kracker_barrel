@@ -1,13 +1,14 @@
 import argparse
 from pathlib import Path
+import sys
 import yaml
 
 
-def load_config(config_file=Path ("config.yaml")):
+def load_config(config_file=Path(__file__).parent.parent / "config.yaml"):
     """
     Load configuration options from a YAML file.
     """
-    with open(config_file, "r") as file:
+    with config_file.open("r") as file:
         return yaml.safe_load(file)
 
 
@@ -17,46 +18,47 @@ def load_args(config=None):
     """
     parser = argparse.ArgumentParser(
         description="Kracker Barrel - Password Hash Cracker",
-        epilog="""Examples:
-        - Dictionary Attack: python main.py -o dict scrypt hashes.txt wordlist.txt
-        - Brute-Force Attack: python main.py -o brut bcrypt hashes.txt --charset "?l?d" --min-length 4 --max-length 6
-        - Mask-Based Attack: python main.py -o mask argon hashes.txt --mask "?u?u?d?d?d"
-        - Rule-Based Attack: main.py -o rule ntlm hashes.txt --rules rules.txt --wordlist1 wordlist1.txt
-        """
     )
-    # Mutually exclusive group for operations
+
+    # Mutually exclusive group for operation modes
     operation_group = parser.add_mutually_exclusive_group(required=True)
     operation_group.add_argument(
         "-d", "--dict",
-        action="store_true",
+        action="store_const",
+        const="dict",
+        dest="operation",
         help="Dictionary attack mode."
     )
     operation_group.add_argument(
         "-b", "--brut",
-        action="store_true",
+        action="store_const",
+        const="brut",
+        dest="operation",
         help="Brute-force attack mode."
     )
     operation_group.add_argument(
         "-m", "--mask",
-        action="store_true",
+        action="store_const",
+        const="mask",
+        dest="operation",
         help="Mask-based attack mode."
     )
     operation_group.add_argument(
         "-r", "--rule",
-        action="store_true",
+        action="store_const",
+        const="rule",
+        dest="operation",
         help="Rule-based attack mode."
     )
 
     # Common arguments
     parser.add_argument(
         "hash_type",
-        nargs="?",
         choices=["argon", "bcrypt", "scrypt", "pbkdf2", "ntlm", "md5", "sha256", "sha512"],
         help="Enter the hash function type you want to crack."
     )
     parser.add_argument(
         "target_file",
-        nargs="?",
         help="Enter the hashed password file to crack."
     )
     parser.add_argument(
@@ -65,31 +67,31 @@ def load_args(config=None):
         help="Enter the file name for dictionary comparison."
     )
 
-    # Arguments specific to brute-force
+    # Arguments specific to brute-force attack
     parser.add_argument(
         "--charset",
         type=str,
         default="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-        help="Charset for brute-force attack (default: alphanumeric)."
+        help="Character set for brute-force attack (default: alphanumeric)."
     )
     parser.add_argument(
-        "--min-length",
+        "--min",
         type=int,
         default=1,
-        help="Minimum length for brute-force attack (default: 1)."
+        help="Minimum password length for brute-force attack (default: 1)."
     )
     parser.add_argument(
-        "--max-length",
+        "--max",
         type=int,
         default=8,
-        help="Maximum length for brute-force attack (default: 8)."
+        help="Maximum password length for brute-force attack (default: 8)."
     )
 
     # Arguments specific to mask-based attack
     parser.add_argument(
-        "--mask",
+        "--pattern",
         type=str,
-        help="Mask for mask-based attack (e.g., '?l?l?l?d' for four lowercase letters and a digit)."
+        help="Mask for mask-based attack (e.g., '?l?l?l?d' for three lowercase letters and a digit)."
     )
 
     # Arguments specific to rule-based attack
@@ -109,34 +111,20 @@ def load_args(config=None):
         help="Path to the second wordlist for rule-based attack."
     )
 
-    # Parse CLI arguments
+    # Handle Simulated Arguments Only When No CLI Arguments
+    if config and len(sys.argv) <= 1:
+        simulated_args = []
+        for key, value in config.items():
+            if key == "operation":
+                simulated_args.append(f"--{value}")
+            elif key in ["hash_type", "target_file", "password_list"] and value is not None:
+                simulated_args.append(value)
+            elif value is not None:
+                simulated_args.extend([f"--{key}", str(value)])
+        
+        print("Simulated Arguments:", simulated_args)  # Debugging Simulated Arguments
+        sys.argv.extend(simulated_args)
+
+    # Parse arguments
     args = parser.parse_args()
-
-    # Map config operation to CLI flags
-    if config:
-        operation_map = {
-            "dict": "dict",
-            "brut": "brut",
-            "mask": "mask",
-            "rule": "rule"
-        }
-        operation = config.get("operation")
-        if operation in operation_map:
-            parser.set_defaults(**{operation_map[operation]: True})
-
-        # Set other config values as defaults
-        parser.set_defaults(
-            hash_type=config.get("hash_type"),
-            target_file=config.get("target_file"),
-            password_list=config.get("password_list"),
-            charset=config.get("charset"),
-            min_length=config.get("min_length"),
-            max_length=config.get("max_length"),
-            mask=config.get("mask"),
-            rules=config.get("rules"),
-            wordlist1=config.get("wordlist1"),
-            wordlist2=config.get("wordlist2"),
-        )
-
-    # Re-parse with defaults applied
-    return parser.parse_args()
+    return args

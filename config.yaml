@@ -1,8 +1,24 @@
+## Rule-based attack
+operation: brut
+hash_type: md5  # Hash type to crack
+target_file: md5_brute_test.txt  # File containing hashed passwords (place in "data/")
+charset: ABCDEFGHIJKLMNOPQRSTUVWXY0123456789$.()+               # Charset for brute force (default: alphanumeric)
+min: 4
+max: 4
+
+
 ## Standard Dictionary Operation ##
-operation: dict 
-hash_type: bcrypt
-target_file: bcrypt.txt
-password_list: dictionary_eng.txt
+# operation: dict
+# hash_type: ntlm
+# target_file: ntlm_mask_test.txt
+# password_list: rockyou.txt
+
+
+## Standard Mask-based Operation ##
+# operation: mask
+# hash_type: ntlm
+# target_file: ntlm_mask_test.txt
+# pattern: "?u?l?l?d?d?s"
 
 
 # Configuration for Cracker Barrel Operations
@@ -17,16 +33,16 @@ password_list: dictionary_eng.txt
 # ----- BRUTE FORCE ATTACK -----
 # operation: brut
 # hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
-# target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
-# charset: abcdef12345               # Charset for brute force (default: alphanumeric)
-# min_length: 6                      # Minimum password length
-# max_length: 8                      # Maximum password length
+# target_file: <hashed_passwords.txt> # File containing hashed passwords (place in "data/")
+# charset: abcdef12345                # Charset for brute force (default: alphanumeric)
+# min: 1                              # Minimum password length
+# max: 4                              # Maximum password length
 
 # ----- MASK-BASED ATTACK -----
 # operation: mask
 # hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
 # target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
-# mask: "?u?l?d"                     # Mask pattern (e.g., ?u = uppercase, ?l = lowercase, ?d = digit)
+# pattern: "?u?l?d"                    # Mask pattern (e.g., ?u = uppercase, ?l = lowercase, ?d = digit)
 
 # ----- RULE-BASED ATTACK -----
 # operation: rule
