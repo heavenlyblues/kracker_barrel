@@ -206,21 +206,21 @@ def main():
 
     if hash_maker.test_mode:
         time_cost, memory_cost, parallelism = 1, 2**10, 1 # Argon
-        rounds = 5              # Bcrypt
+        rounds = 5                  # Bcrypt
         algorithm = hashes.SHA256() #PBKDF2
-        salt_length = 12        # Scrypt & PBDKF2
-        hash_length = 32        # Scrypt & PBKDF2
-        n, r, p = 32, 2**8, 8, 1   # Scrypt memory cost, block size, parallelism
-        iterations = 1000       # PBDKF2
+        salt_length = 12            # Scrypt & PBDKF2
+        hash_length = 32            # Scrypt & PBKDF2
+        n, r, p = 32, 2**8, 8, 1    # Scrypt memory cost, block size, parallelism
+        iterations = 1000           # PBDKF2
         
     else:
         time_cost, memory_cost, parallelism = 3, 2**14, 1 # Argon
-        rounds = 10             # Bcrypt
-        algorithm = hashes.SHA512() #PBKDF2
-        salt_length = 16        # Scrypt & PBDKF2
-        hash_length = 64        # Scrypt & PBKDF2
-        hash_length, n, r, p = 64, 32768, 8, 1   # Scrypt memory cost, block size, parallelism
-        iterations = 210000     # PBDKF2
+        rounds = 10                 # Bcrypt
+        algorithm = hashes.SHA512() # PBKDF2
+        salt_length = 16            # Scrypt & PBDKF2
+        hash_length = 64            # Scrypt & PBKDF2
+        n, r, p = 32768, 8, 1   #    Scrypt memory cost, block size, parallelism
+        iterations = 210000         # PBDKF2
 
     commands = {
         "argon": lambda: hash_maker.compute_argon(time_cost, memory_cost, parallelism),
