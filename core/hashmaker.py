@@ -41,33 +41,39 @@ class HashMaker():
         return decoded_hashes
 
 
-    def compute_scrypt(self, n, r, p):
+    def compute_scrypt(self, salt_length, hash_length, n, r, p):
         hash_list = []
         for password in self.passwords:
             # Set up the Scrypt KDF
-            salt = os.urandom(16)
-            kdf = Scrypt(salt=salt, length=32, n=n, r=r, p=p)
+            salt = os.urandom(salt_length)
+            kdf = Scrypt(salt=salt, length=hash_length, n=n, r=r, p=p)
             hashed = kdf.derive(password.encode())
 
-            # Encode salt and hash with base64 and decode to string
+            # Convert salt to Base64 and hash to Hex
             salt_b64 = base64.urlsafe_b64encode(salt).decode("utf-8")
-            hashed_b64 = base64.urlsafe_b64encode(hashed).decode("utf-8")
+            hashed_hex = hashed.hex()
 
-            hash_list.append(f"$scrypt$ln={n},r={r},p={p}${salt_b64}${hashed_b64}")
+            # Create the formatted output string
+            formatted_hash = f"scrypt:{n}:{r}:{p}${salt_b64}${hashed_hex}"
+            hash_list.append(formatted_hash)
+
         return hash_list
 
 
-    def compute_pbkdf2(self, iterations):
+    def compute_pbkdf2(self, algorithm, salt_length, hash_length, iterations):
         hash_list = []
+        
+        algorithm_name = "sha512" if algorithm.name == "sha512" else algorithm.name
+
         for password in self.passwords:
-            salt = os.urandom(16)
-            kdf = PBKDF2HMAC(algorithm=hashes.SHA512(), length=32, salt=salt, iterations=iterations)
+            salt = os.urandom(salt_length)
+            kdf = PBKDF2HMAC(algorithm=algorithm, length=hash_length, salt=salt, iterations=iterations)
             hashed = kdf.derive(password.encode())
             # Encode salt and hash with base64 and decode to string
             salt_b64 = base64.urlsafe_b64encode(salt).decode("utf-8")
-            hashed_b64 = base64.urlsafe_b64encode(hashed).decode("utf-8")
+            hashed_hex = hashed.hex()
             
-            hash_list.append(f"$pbkdf2_sha512$iterations={iterations}${salt_b64}${hashed_b64}")
+            hash_list.append(f"pbkdf2:{algorithm_name}:{iterations}${salt_b64}${hashed_hex}")
         return hash_list
 
 
@@ -201,20 +207,26 @@ def main():
     if hash_maker.test_mode:
         time_cost, memory_cost, parallelism = 1, 2**10, 1 # Argon
         rounds = 5              # Bcrypt
-        n, r, p = 2**8, 8, 1   # Scrypt memory cost, block size, parallelism
+        algorithm = hashes.SHA256() #PBKDF2
+        salt_length = 12        # Scrypt & PBDKF2
+        hash_length = 32        # Scrypt & PBKDF2
+        n, r, p = 32, 2**8, 8, 1   # Scrypt memory cost, block size, parallelism
         iterations = 1000       # PBDKF2
         
     else:
         time_cost, memory_cost, parallelism = 3, 2**14, 1 # Argon
         rounds = 10             # Bcrypt
-        n, r, p = 2**14, 8, 5   # Scrypt memory cost, block size, parallelism
+        algorithm = hashes.SHA512() #PBKDF2
+        salt_length = 16        # Scrypt & PBDKF2
+        hash_length = 64        # Scrypt & PBKDF2
+        hash_length, n, r, p = 64, 32768, 8, 1   # Scrypt memory cost, block size, parallelism
         iterations = 210000     # PBDKF2
 
     commands = {
         "argon": lambda: hash_maker.compute_argon(time_cost, memory_cost, parallelism),
         "bcrypt": lambda: hash_maker.compute_bcrypt(rounds),
-        "scrypt": lambda: hash_maker.compute_scrypt(n, r, p),
-        "pbkdf2": lambda: hash_maker.compute_pbkdf2(iterations),
+        "scrypt": lambda: hash_maker.compute_scrypt(salt_length, hash_length, n, r, p),
+        "pbkdf2": lambda: hash_maker.compute_pbkdf2(algorithm, salt_length, hash_length, iterations),
         "md5": lambda: hash_maker.compute_md5(),
         "ntlm": lambda: hash_maker.compute_ntlm(),
         "sha256": lambda: hash_maker.compute_sha256(),

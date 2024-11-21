@@ -16,7 +16,7 @@ class Kracker:
         self.hash_type = args.hash_type # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.target_file = Path ("data") / args.target_file
         self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
-        self.batch_size = 2000  # Adjust batch size for performance
+        self.batch_size = 1251  # Adjust batch size for performance
         self.mask_pattern = args.pattern # Mask-based attack
         self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
 
@@ -150,17 +150,20 @@ class Kracker:
     def process_task_result(self, task_result):
         """Process the result of a completed future."""
         try:
-            pwned_pwd, chunk_count = task_result.result()
+            results, chunk_count = task_result.result()  # Expecting a tuple
             self.summary_log["total_count"] += chunk_count
 
-            if pwned_pwd:
-                self.summary_log["pwned"].append(pwned_pwd)  # Append all matched passwords
-
-                # Increment found_flag every time a match is found
+            # Process all matches in the results list
+            for pwned_pwd in results:
+                self.summary_log["pwned"].append(pwned_pwd)
                 self.found_flag["found"] += 1
                 tqdm.write(f"{GREEN}[MATCH] Password found: {pwned_pwd}{RESET}")
 
-                return True, chunk_count
+            # If no matches were found
+            if not results:
+                tqdm.write(f"{LIGHT_YELLOW}[INFO] No matches found in this chunk.{RESET}")
+
+            return True, chunk_count
         except Exception as e:
             import traceback
             print(f"Error in process_task_result: {e}")

@@ -2,11 +2,16 @@ import itertools
 
 
 MASK_MAP = {
-    "?u": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",  # Uppercase letters
-    "?l": "abcdefghijklmnopqrstuvwxyz",  # Lowercase letters
-    "?d": "0123456789",                  # Digits
-    "?s": "!@#$%^&*()-_=+[]{}|;:',.<>?/`~",  # Special characters
-    "?a": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:',.<>?/`~"  # All printable characters
+    "?u":   "ABCDEFGHIJKLMNOPQRSTUVWXYZ",       # Uppercase letters
+    "?uv":  "ABCDEFGHIJKLMNOPQRSTUVWXYZÅÄÖÉ",   # Uppercase letters Swedish
+    "?l":   "abcdefghijklmnopqrstuvwxyz",       # Lowercase letters
+    "?lv":  "abcdefghijklmnopqrstuvwxyzåäöé",   # Lowercase letters Swedish
+    "?d":   "0123456789",                       # Digits
+    "?s":   "!@#$%^&*()-_=+[]{}|;:',.<>?/`~",   # Special characters
+    "?p":   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:',.<>?/`~",     # standard printable character
+    "?h":   "0123456789ABCDEF",                 # hexidecimal
+    "?x":   " "                                 # Space character
+
 }
 
 

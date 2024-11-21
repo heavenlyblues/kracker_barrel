@@ -10,10 +10,28 @@ import hashlib
 
 
 class HashHandler:
+    # Define a mapping of algorithm names to their respective hash objects
+    ALGORITHM_MAP = {
+        "sha512": hashes.SHA512,
+        "sha256": hashes.SHA256,
+        "sha1": hashes.SHA1,
+        # Add more algorithms as needed
+    }
+
     def __init__(self, hash_digest_with_metadata):
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.target_hash_to_crack = []
         self.hash_processor = None
+
+    def parse_algorithm(self, algorithm_name):
+        """
+        Dynamically parse and return the hash algorithm object based on its name.
+        """
+        algorithm_name = algorithm_name.lower()  # Ensure case-insensitivity
+        algorithm_class = self.ALGORITHM_MAP.get(algorithm_name)
+        if not algorithm_class:
+            raise ValueError(f"Unsupported algorithm: {algorithm_name}")
+        return algorithm_class()
 
     def parse_hash_digest_with_metadata(self):
         raise NotImplementedError("Subclasses must implement this method.")
@@ -90,25 +108,33 @@ class ScryptHandler(HashHandler):
         for hash_digest in self.hash_digest_with_metadata:
             # Split the hash digest into components
             parts = hash_digest.split("$")
-            if len(parts) != 5 or parts[0] != "":
+            if len(parts) != 3:
                 raise ValueError(f"Invalid scrypt hash format: {hash_digest}")
 
             # Parse n, r, p parameters
-            n = int(parts[2].split("=")[1].split(",")[0])  # Memory cost
-            r = int(parts[2].split(",")[1].split("=")[1])  # Block size
-            p = int(parts[2].split(",")[2].split("=")[1])  # Parallelism
+            params = parts[0].split(":")[1:]  # Skip "scrypt"
+            if len(params) != 3:
+                raise ValueError(f"Invalid parameters in scrypt hash: {hash_digest}")
+            n, r, p = map(int, params)
 
             # Decode salt and hash
-            salt_b64 = parts[3]
-            hash_b64 = parts[4]
-            salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
-            target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
+            salt_b64 = parts[1]
+            hash_hex = parts[2]
+            
+            try:
+                salt = base64.urlsafe_b64decode(salt_b64)
+                target_hash = bytes.fromhex(hash_hex)
+            except Exception as e:
+                raise ValueError(f"Error decoding salt or hash: {e}")
+
+            length = len(target_hash)
 
             # Store parameters and decoded hashes
             self.target_hash_to_crack.append({
                 "n": n,
                 "r": r,
                 "p": p,
+                "length": length,
                 "salt": salt,
                 "target_hash": target_hash
             })
@@ -123,15 +149,18 @@ class ScryptHandler(HashHandler):
             n = entry["n"]
             r = entry["r"]
             p = entry["p"]
+            length = entry["length"]
             salt = entry["salt"]
             target_hash = entry["target_hash"]
-
+            # print(f"Parsed parameters: n={n}, r={r}, p={p}, length={length} salt={salt}, target_hash={target_hash}")
             # Instantiate a new Scrypt KDF
-            scrypt_kdf = Scrypt(salt=salt, length=32, n=n, r=r, p=p)
+            scrypt_kdf = Scrypt(salt=salt, length=length, n=n, r=r, p=p)
             try:
                 # Derive the hash for the potential password
                 computed_hash = scrypt_kdf.derive(potential_password_match)
-
+                # print(f"Computed hash length: {len(computed_hash)}, Target hash length: {len(target_hash)}")
+                # print(f"Computed Hash: {base64.urlsafe_b64encode(computed_hash).decode('utf-8')}")
+                # print(f"Target Hash: {base64.urlsafe_b64encode(target_hash).decode('utf-8')}")
                 # Compare computed hash with the target hash
                 if computed_hash == target_hash:
                     return potential_password_match.decode()  # Match found
@@ -148,19 +177,34 @@ class PBKDF2Handler(HashHandler):
 
         for hash_digest in self.hash_digest_with_metadata:
             parts = hash_digest.split("$")
-            if len(parts) != 5 or parts[0] != "":
+            if len(parts) != 3:
                 raise ValueError("Invalid PBKDF2 hash format")
+            
+            # Parse the algorithm and iterations
+            params = parts[0].split(":")[1:]  # Skip "pbkdf2"
+            if len(params) != 2:
+                raise ValueError(f"Invalid parameters in PBKDF2 hash: {hash_digest}")
 
-            iterations = int(parts[2].split("=")[1])
-            salt_b64 = parts[3]
-            hash_b64 = parts[4]
+            algorithm = params[0]  # Algorithm (e.g., "sha512")
+            try:
+                iterations = int(params[1])  # Convert iterations to an integer
+            except ValueError:
+                raise ValueError(f"Invalid iterations value: {params[1]}")
+            
+            salt_b64 = parts[1]
+            hash_hex = parts[2]
 
-            # Decode salt and target hash
-            salt = base64.urlsafe_b64decode(salt_b64.encode("utf-8"))
-            target_hash = base64.urlsafe_b64decode(hash_b64.encode("utf-8"))
+            try:
+                salt = base64.urlsafe_b64decode(salt_b64)
+                target_hash = bytes.fromhex(hash_hex)
+            except Exception as e:
+                raise ValueError(f"Error decoding salt or hash: {e}")
+            
 
             # Append to the list of hashes to crack
             self.target_hash_to_crack.append({
+                "algorithm": algorithm,
+                "hash_length": len(target_hash),
                 "iterations": iterations,
                 "salt": salt,
                 "target_hash": target_hash
@@ -171,14 +215,18 @@ class PBKDF2Handler(HashHandler):
         Verifies a potential password against a list of stored PBKDF2 hashes.
         """
         for entry in self.target_hash_to_crack:
+            algorithm_name = entry["algorithm"]
+            hash_length = entry["hash_length"]
             iterations = entry["iterations"]
             salt = entry["salt"]
             target_hash = entry["target_hash"]
 
+            algorithm = self.parse_algorithm(algorithm_name)
+
             # Create a new PBKDF2HMAC instance dynamically
             hash_processor = PBKDF2HMAC(
-                algorithm=hashes.SHA512(),
-                length=32,
+                algorithm=algorithm,
+                length=hash_length,
                 salt=salt,
                 iterations=iterations
             )
@@ -381,19 +429,21 @@ def crack_chunk_wrapper(hash_type, hash_digest_with_metadata, chunk, found_flag)
 
 def crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag):
     chunk_count = 0
+    results = []  # Collect all matches
+
     if found_flag["found"] >= found_flag["goal"]:
-        return False, chunk_count
+        return results, chunk_count
 
     hash_handler = get_hash_handler(hash_type, hash_digest_with_metadata)
     hash_handler.parse_hash_digest_with_metadata()
 
     for potential_password_match in chunk:
         if found_flag["found"] >= found_flag["goal"]:
-            return False, chunk_count
+            return results, chunk_count
 
         chunk_count += 1
         matched_passwords = hash_handler.verify(potential_password_match)
         if matched_passwords is not None:
-            return matched_passwords, chunk_count
+            results.append(matched_passwords)  # Collect matches in the list
 
-    return False, chunk_count
+    return results, chunk_count  # Return all matches at once
