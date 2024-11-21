@@ -6,6 +6,7 @@
 /tests
 /data
 /tools
+/profiling
 
 # Ignore virtual environments
 .venv/
