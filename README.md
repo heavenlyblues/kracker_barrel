@@ -110,26 +110,26 @@ Cracker Barrel now supports using a configuration file (`config.yaml`) to define
 - Simplifies workflow for commonly used setups.
 - Allows for easy planning and recovery strategies.
 - Facilitates the storage of multiple cracking configurations.
----
 
-DICTIONARY RECOVERY |||
+---
+Config.yaml|||
 --|--|--|
+|||
+DICTIONARY RECOVERY |||
 **operation**: | `dict`
 **hash_type**: | `argon`  |# Supported: argon, bcrypt, scrypt, pbkdf2, ntlm, md5, sha256, sha512
 **target_file**: | `hashed_passwords.txt`  |# File containing hashed passwords (place in "data/")
 **password_list**: | `rockyou.txt`      |# File with potential passwords (place in "refs/")
-
+|||
 BRUTE FORCE RECOVERY |||
---|--|--|
 **operation**: | `brut`
 **hash_type**: | `sha256`  |# Supported: argon, bcrypt, scrypt, pbkdf2, ntlm, md5, sha256, sha512
 **target_file**: | `hashed_passwords.txt`  |# File containing hashed passwords (place in "data/")
 **charset**: | `abcdef12345`                 |# Charset for brute force (default: alphanumeric)
 **min**: | `1`                               |# Minimum password length
 m**ax**: | `4`                               |# Maximum password length
-
+|||
 MASK-BASED RECOVERY |||
---|--|--|
 **operation**: | `mask`
 **hash_type**: | `bcrypt`  |# Supported: argon, bcrypt, scrypt, pbkdf2, ntlm, md5, sha256, sha512
 **target_file**: | `hashed_passwords.txt`  |# File containing hashed passwords (place in "data/")
