@@ -1,9 +1,10 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
 import os, time
+import logging
 from pathlib import Path
 from tqdm import tqdm
-from core.hash_handler import crack_chunk_wrapper
+from core.hash_handler import HashHandler, crack_chunk_wrapper
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
@@ -27,7 +28,28 @@ class Kracker:
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
         self.batch_generator = None
 
+        self.hash_handler = self.initialize_hash_handler()
         self.summary_log = self.initialize_summary_log()
+
+
+    def initialize_hash_handler(self):
+        handlers = {
+            "argon": HashHandler.Argon2Handler,
+            "scrypt": HashHandler.ScryptHandler,
+            "pbkdf2": HashHandler.PBKDF2Handler,
+            "bcrypt": HashHandler.BcryptHandler,
+            "ntlm": HashHandler.NTLMHandler,
+            "md5": HashHandler.MD5Handler,
+            "sha256": HashHandler.SHA256Handler,
+            "sha512": HashHandler.SHA512Handler,
+        }
+        try:
+            handler_class = handlers.get(self.hash_type)
+            if not handler_class:
+                raise ValueError(f"No handler found for hash type: {self.hash_type}")
+            return handler_class(self.hash_digest_with_metadata)  # Pass metadata if required
+        except ValueError as e:
+            raise ValueError(f"Error determining hash type or handler: {e}")
 
 
     def __str__(self):
@@ -51,7 +73,7 @@ class Kracker:
         elif self.operation == "rule":
             number_of_passwords = 1
 
-
+        
         total_batches = (number_of_passwords // self.batch_size) + 1
         
         return {
@@ -175,18 +197,20 @@ class Kracker:
 
     def final_summary(self):
         """Display final summary after processing is completed."""
+        # Retrieve hash parameters
+        self.summary_log["hash_parameters"] = self.hash_handler.log_parameters()
+
+        # Construct the final message based on results
         if self.found_flag["found"] == 0:
             self.summary_log["message"] = (
                 "No match found in word list. Program terminated."
             )
-
         elif self.found_flag["found"] < self.found_flag["goal"]:
             self.summary_log["message"] = (
                 f"{self.found_flag['found']} of {self.found_flag['goal']} "
                 "match(es) found in word list. Program terminated."
             )
-
-        elif self.found_flag["found"] >= self.found_flag["goal"]:
+        else:
             self.summary_log["message"] = (
                 f"{self.found_flag['found']} of {self.found_flag['goal']} "
                 "match(es) found in word list."

@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import hashlib
+import logging
 
 
 class HashHandler:
@@ -38,7 +39,7 @@ class HashHandler:
 
     def verify(self, potential_password_match):
         raise NotImplementedError("Subclasses must implement this method.")
-
+    
     def hex_to_bytes(self, hash_string):
         """
         Utility method to convert a hexadecimal hash string to bytes.
@@ -47,9 +48,19 @@ class HashHandler:
             return bytes.fromhex(hash_string)
         except ValueError:
             raise ValueError("Invalid hash format (not hexadecimal)")
+        
+    def log_parameters(self):
+        raise NotImplementedError("Subclasses must implement this method.")
+    
+    def return_parameter_log(self):
+        return self.log_parameters()
 
 
 class Argon2Handler(HashHandler):
+    def __init__(self, hash_digest_with_metadata):
+        self.hash_digest_with_metadata = hash_digest_with_metadata
+        self.parameters = self.parse_hash_digest_with_metadata()
+    
     def parse_hash_digest_with_metadata(self):
         """
         Parses the Argon2 metadata from hash_digest_with_metadata and decodes
@@ -77,7 +88,7 @@ class Argon2Handler(HashHandler):
                     time_cost=time_cost, memory_cost=memory_cost, parallelism=parallelism
                 ),
             })
-
+        return version, memory_cost, time_cost, parallelism
 
     def verify(self, potential_password_match):
         """
@@ -96,8 +107,20 @@ class Argon2Handler(HashHandler):
 
         return None  # No matches found
 
+    def log_parameters(self):
+        """Return a formatted log message for parameters."""
+        version, memory_cost, time_cost, parallelism = self.parameters
+        return (
+            f"version={version}, memory_cost={memory_cost}, "
+            f"time_cost={time_cost}, parallelism={parallelism}"
+        )
+
 
 class ScryptHandler(HashHandler):
+    def __init__(self, hash_digest_with_metadata):
+        self.hash_digest_with_metadata = hash_digest_with_metadata
+        self.parameters = self.parse_hash_digest_with_metadata()
+
     def parse_hash_digest_with_metadata(self):
         """
         Parses the scrypt metadata from hash_digest_with_metadata and decodes
@@ -138,6 +161,7 @@ class ScryptHandler(HashHandler):
                 "salt": salt,
                 "target_hash": target_hash
             })
+        return n, r, p, length
 
     def verify(self, potential_password_match):
         """
@@ -169,6 +193,14 @@ class ScryptHandler(HashHandler):
                 continue  # Move to the next hash in case of an error
 
         return None  # No match found
+    
+    def log_parameters(self):
+        """Return a formatted log message for parameters."""
+        n, r, p, length = self.parameters
+        return (
+            f"length={length}, n={n}, "
+            f"r={r}, parallelism={p}"
+        )
 
 
 class PBKDF2Handler(HashHandler):
@@ -395,6 +427,17 @@ class SHA512Handler(HashHandler):
             return None
 
 
+# Assign handlers to HashHandler dynamically
+HashHandler.Argon2Handler = Argon2Handler
+HashHandler.ScryptHandler = ScryptHandler
+HashHandler.PBKDF2Handler = PBKDF2Handler
+HashHandler.BcryptHandler = BcryptHandler
+HashHandler.NTLMHandler = NTLMHandler
+HashHandler.MD5Handler = MD5Handler
+HashHandler.SHA256Handler = SHA256Handler
+HashHandler.SHA512Handler = SHA512Handler
+
+
 def get_hash_handler(hash_type, hash_digest_with_metadata):
     hash_handlers = {
         "argon": lambda x: Argon2Handler(x),
@@ -416,12 +459,7 @@ def get_hash_handler(hash_type, hash_digest_with_metadata):
    
     except ValueError as e:
         raise ValueError(f"Error determining hash type or handler: {e}")
-
-    # CLEAN AF but not as efficient
-    # for key, handler in hash_handlers.items():
-    #     if key == hash_type:
-    #         return handler(hash_digest_with_metadata)
-
+    
 
 def crack_chunk_wrapper(hash_type, hash_digest_with_metadata, chunk, found_flag):
     return crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag)
@@ -445,5 +483,5 @@ def crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag):
         matched_passwords = hash_handler.verify(potential_password_match)
         if matched_passwords is not None:
             results.append(matched_passwords)  # Collect matches in the list
-
+    
     return results, chunk_count  # Return all matches at once
