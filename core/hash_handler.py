@@ -8,8 +8,6 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import hashlib
 import logging
-from multiprocessing import shared_memory
-
 
 
 class HashHandler:
@@ -761,52 +759,28 @@ def get_hash_handler(hash_type, hash_digest_with_metadata):
         raise ValueError(f"Error determining hash type or handler: {e}")
     
 
-def crack_chunk_wrapper(hash_type, hash_digest_with_metadata, shared_mem_name, found_flag):
-    """
-    Worker function that processes a password batch from shared memory.
-
-    Args:
-        hash_type (str): Type of the hash being cracked.
-        hash_digest_with_metadata (list): Target hashes with metadata.
-        shared_mem_name (str): Name of the shared memory segment.
-        found_flag (dict): Shared dictionary for tracking matches.
-
-    Returns:
-        tuple: (list of matched passwords, number of passwords processed)
-    """
-    # Attach to the shared memory segment
-    shared_mem = shared_memory.SharedMemory(name=shared_mem_name)
-    buffer = shared_mem.buf.tobytes().strip(b"\x00")  # Read the shared memory buffer, stripping padding
-    passwords = buffer.split(b"\n")  # Split into individual passwords
-
-    # Delegate to the main cracking logic
-    results, chunk_count = crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag)
-
-    # Detach from shared memory
-    shared_mem.close()
-    return results, chunk_count
+def crack_chunk_wrapper(hash_type, hash_digest_with_metadata, chunk, found_flag):
+    return crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag)
 
 
-def crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag):
+def crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag):
     chunk_count = 0
-    results = []
+    results = []  # Collect all matches
 
-    # Early exit if all hashes are already cracked
     if found_flag["found"] >= found_flag["goal"]:
         return results, chunk_count
-
-    # Initialize the hash handler
+    
     hash_handler = get_hash_handler(hash_type, hash_digest_with_metadata)
     hash_handler.parse_hash_digest_with_metadata()
 
-    # Process each password in the batch
-    for potential_password_match in passwords:
+    for potential_password_match in chunk:
+        # print(f"Testing: {potential_password_match}")
         if found_flag["found"] >= found_flag["goal"]:
             return results, chunk_count
 
         chunk_count += 1
         matched_passwords = hash_handler.verify(potential_password_match)
         if matched_passwords is not None:
-            results.append(matched_passwords)
-
-    return results, chunk_count
+            results.append(matched_passwords)  # Collect matches in the list
+    
+    return results, chunk_count  # Return all matches at once
