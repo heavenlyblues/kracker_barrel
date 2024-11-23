@@ -1,5 +1,5 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Manager
+from multiprocessing import Manager, shared_memory
 import os, time
 from pathlib import Path
 from tqdm import tqdm
@@ -7,7 +7,7 @@ from core.hash_handler import HashHandler, crack_chunk_wrapper
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
-from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
+from utils.reporter import display_summary, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
 
 
 class Kracker:
@@ -29,10 +29,25 @@ class Kracker:
         
         self.batch_size = 2000  # Adjust batch size for performance
         self.batch_generator = None
+        
+        # Calculate shared memory size (batch size * max password length in bytes)
+        self.shared_mem_size = self.batch_size * 64  # Assuming max password length = 64 bytes
+        self.shared_mem = shared_memory.SharedMemory(create=True, size=self.shared_mem_size)
 
         self.hash_handler = self.initialize_hash_handler()
         self.summary_log = self.initialize_summary_log()
 
+    def __del__(self):
+        # Cleanup shared memory when the object is destroyed
+        self.cleanup_shared_memory()
+
+    def cleanup_shared_memory(self):
+        if hasattr(self, "shared_mem") and self.shared_mem:
+            try:
+                self.shared_mem.close()
+                self.shared_mem.unlink()  # Unlink to free the memory
+            except Exception as e:
+                print(f"Error cleaning up shared memory: {e}")
 
     def detect_hash_type(self):
         type_check = self.hash_digest_with_metadata[0].split("$", 2)[1]
@@ -117,7 +132,7 @@ class Kracker:
 
     def initialize_batch_generator(self):
         if self.operation == "dict":
-            self.batch_generator = yield_dictionary_batches(self.path_to_passwords, self.batch_size)
+            self.batch_generator = yield_dictionary_batches(self.path_to_passwords, self.batch_size, self.shared_mem)
         elif self.operation == "brut":
             generator = generate_brute_candidates(self.brute_settings)
             self.batch_generator = yield_brute_batches(generator, self.batch_size)
@@ -149,10 +164,16 @@ class Kracker:
                     #  Submit batches to crack chunk and collect results in futures
                     for _ in range(preload_limit):
                         try:
-                            chunk = next(self.batch_generator)
-                            future = executor.submit(crack_chunk_wrapper, self.hash_type, 
-                                                     self.hash_digest_with_metadata, chunk, 
-                                                     self.found_flag)
+                            batch = next(self.batch_generator)
+                            # Write batch to shared memory
+                            self.shared_mem.buf[:len(batch)] = b"\n".join(batch).ljust(self.shared_mem_size, b"\x00")
+                            future = executor.submit(
+                                crack_chunk_wrapper,
+                                self.hash_type,
+                                self.hash_digest_with_metadata,
+                                self.shared_mem.name,
+                                self.found_flag
+                            )
                             futures.append(future)
                         except StopIteration:  # Once batches are consumed, generator raises a StopIteration exception
                             break  # No more batches to preload
@@ -174,10 +195,15 @@ class Kracker:
                                 # Dynamically preload new batches as space frees up
                                 if len(futures) < preload_limit:
                                     try:
-                                        chunk = next(self.batch_generator)
-                                        new_future = executor.submit(crack_chunk_wrapper, self.hash_type, 
-                                                                     self.hash_digest_with_metadata, chunk, 
-                                                                     self.found_flag)
+                                        batch = next(self.batch_generator)
+                                        self.shared_mem.buf[:len(batch)] = b"\n".join(batch).ljust(self.share_mem_size, b"\x00")
+                                        new_future = executor.submit(
+                                            crack_chunk_wrapper,
+                                            self.hash_type,
+                                            self.hash_digest_with_metadata,
+                                            self.shared_mem.name,
+                                            self.found_flag
+                                        )
                                         futures.append(new_future)
                                     except StopIteration: # Generator raises a StopIteration exception
                                         pass  # No more batches to load
@@ -193,6 +219,10 @@ class Kracker:
             self.summary_log["message"] = "Process interrupted. Partial summary_log displayed."
             self.summary_log["elapsed_time"] = time.time() - self.start_time
             display_summary(self.found_flag, self.summary_log)
+        
+        finally:
+            # Ensure shared memory cleanup
+            self.cleanup_shared_memory()
 
 
     # Process the resluts from completed futures
