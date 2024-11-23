@@ -1,35 +1,59 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
 import os, time
-import logging
 from pathlib import Path
 from tqdm import tqdm
 from core.hash_handler import HashHandler, crack_chunk_wrapper
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
-from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, BLINK, DIM, RESET
+from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
 
 
 class Kracker:
     def __init__(self, args):
         self.operation = args.operation # dict, brut, mask, rule
-        self.hash_type = args.hash_type # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.target_file = Path ("data") / args.target_file
+        self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
+        self.hash_type = self.detect_hash_type() # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
-        self.batch_size = 2000  # Adjust batch size for performance
+        
         self.mask_pattern = args.pattern # Mask-based attack
+        self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
         self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
 
         self.manager = Manager()
         self.start_time = time.time()
-        self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
+        
+        self.batch_size = 2000  # Adjust batch size for performance
         self.batch_generator = None
 
         self.hash_handler = self.initialize_hash_handler()
         self.summary_log = self.initialize_summary_log()
+
+
+    def detect_hash_type(self):
+        type_check = self.hash_digest_with_metadata[0].split("$", 2)[1]
+        
+        # Use a dictionary to map type_check to hash types
+        hash_map = {
+            "argon2id": "argon",
+            "2b": "bcrypt",
+            "pbkdf2": "pbkdf2",
+            "scrypt": "scrypt",
+            "ntlm": "ntlm",
+            "md5": "md5",
+            "sha256": "sha256",
+            "sha512": "sha512"
+        }
+
+        # Return the mapped hash type or raise an error for unknown types
+        try:
+            return hash_map[type_check]
+        except KeyError:
+            raise ValueError(f"Unknown hash format: {type_check}")
 
 
     def initialize_hash_handler(self):
@@ -60,6 +84,7 @@ class Kracker:
             f"  Hash type: {self.hash_type}\n"
             f"  Password list: {self.path_to_passwords}\n"
             f"  Batch size: {self.batch_size}\n"
+            f"  Workers: {self.summary_log["workers"]}\n"
         )
 
 
@@ -69,7 +94,7 @@ class Kracker:
         elif self.operation == "brut":
             number_of_passwords = get_brute_count(self.brute_settings)
         elif self.operation == "mask":
-            number_of_passwords = get_mask_count(self.pattern)
+            number_of_passwords = get_mask_count(self.mask_pattern, self.custom_strings)
         elif self.operation == "rule":
             number_of_passwords = 1
 
@@ -97,7 +122,7 @@ class Kracker:
             generator = generate_brute_candidates(self.brute_settings)
             self.batch_generator = yield_brute_batches(generator, self.batch_size)
         elif self.operation == "mask":
-            generator = generate_mask_candidates(self.mask_pattern)
+            generator = generate_mask_candidates(self.mask_pattern, self.custom_strings)
             self.batch_generator = yield_maskbased_batches(generator, self.batch_size)
         elif self.operation == "rule":
             pass
@@ -106,21 +131,20 @@ class Kracker:
     def run(self):
         """Main loop to process password batches and handle matches."""
         print(self)  # Calls the __str__ method to print the configuration
+
         try:
-            with ProcessPoolExecutor(max_workers=self.summary_log["workers"]) as executor:
+            with ProcessPoolExecutor(max_workers=6) as executor:
                 self.initialize_batch_generator()
 
                 futures = []  # Queue to hold active Future objects
-                preload_limit = self.summary_log["workers"] * 3
+                preload_limit = self.summary_log["workers"] * 2
+                print(f"{LIGHT_YELLOW}Starting batch preloading...{RESET}", end=" ")
+                print(f"{DIM}Done!{RESET}")
 
-                print(f"{LIGHT_YELLOW}Starting preloading...{RESET}")
-                blinking_text("Preloading batches...", duration=5)
-                print("Done!\n")
-                print(f"{DIM}Scanning...{RESET}")
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
-                          total=self.summary_log["batches"], smoothing=1, 
-                          ncols=100, leave=False, ascii=True) as progress_bar:
+                          total=self.summary_log["batches"], mininterval=0.1, smoothing=0.1, 
+                          ncols=100, leave=True, ascii=True) as progress_bar:
 
                     #  Submit batches to crack chunk and collect results in futures
                     for _ in range(preload_limit):
@@ -143,6 +167,7 @@ class Kracker:
 
                                 # Stop if all the target hashes are matched 
                                 if self.found_flag["found"] == self.found_flag["goal"]:
+                                    progress_bar.close()  # Ensure progress bar closes cleanly
                                     self.final_summary()
                                     return  # Exit immediately
 
@@ -160,6 +185,7 @@ class Kracker:
                                 print(f"Error processing future: {e}")
                             finally:
                                 futures.remove(future)
+                    progress_bar.close()  # Ensure progress bar closes cleanly
             self.final_summary()
 
         except KeyboardInterrupt:

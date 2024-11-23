@@ -16,16 +16,52 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 class HashMaker():
-    def __init__(self, operation, passwords, output_file, test_mode):
+    def __init__(self, operation, passwords, output_file, test_mode, secure_mode):
         self.operation = operation
         self.passwords = passwords
         self.output_file = output_file
         self.file_path = None
         self.test_mode = test_mode
+        self.secure_mode = secure_mode
+        self.parameters = self.set_parameters()
 
+    def set_parameters(self):
+        if self.test_mode:
+            return {
+                "argon": {"time_cost": 1, "memory_cost": 1024, "parallelism": 1},
+                "bcrypt": {"rounds": 5},
+                "scrypt": {"salt_length": 12, "hash_length": 32, "n": 2**8, "r": 8, "p": 1},
+                "pbkdf2": {"algorithm": hashes.SHA256(), "algo_text": "sha256", "iterations": 1000, "salt_length": 12, "hash_length": 32}
+            }
+        elif self.secure_mode:
+            return {
+                "argon": {"time_cost": 1, "memory_cost": 47104, "parallelism": 1},
+                "bcrypt": {"rounds": 12},
+                "scrypt": {"salt_length": 32, "hash_length": 64, "n": 2**17, "r": 8, "p": 1},
+                "pbkdf2": {"algorithm": hashes.SHA512(), "algo_text": "sha512", "iterations": 600000, "salt_length": 32, "hash_length": 64}
+            }
+        else:
+            return {
+                "argon": {"time_cost": 3, "memory_cost": 12288, "parallelism": 1},
+                "bcrypt": {"rounds": 10},
+                "scrypt": {"salt_length": 16, "hash_length": 32, "n": 2**15, "r": 8, "p": 3},
+                "pbkdf2": {"algorithm": hashes.SHA512(), "algo_text": "sha512", "iterations": 210000, "salt_length": 16, "hash_length": 32}
+            }
+        
+    def compute_argon(self, time_cost, memory_cost, parallelism):
+        """
+        Compute Argon2 hashes using explicit keyword arguments.
 
-    def compute_argon(self, tc, mc, p):
-        ph = PasswordHasher(time_cost=tc, memory_cost=mc, parallelism=p)
+        Parameters:
+            time_cost (int): The time cost parameter.
+            memory_cost (int): The memory cost parameter.
+            parallelism (int): The degree of parallelism.
+        """
+        ph = PasswordHasher(
+            time_cost=time_cost, 
+            memory_cost=memory_cost, 
+            parallelism=parallelism
+        )
         hash_list = []
         for password in self.passwords:
             hash_list.append(ph.hash(password.encode()))
@@ -46,7 +82,13 @@ class HashMaker():
         for password in self.passwords:
             # Set up the Scrypt KDF
             salt = os.urandom(salt_length)
-            kdf = Scrypt(salt=salt, length=hash_length, n=n, r=r, p=p)
+            kdf = Scrypt(
+                salt=salt, 
+                length=hash_length, 
+                n=n, 
+                r=r, 
+                p=p
+            )
             hashed = kdf.derive(password.encode())
 
             # Convert salt to Base64 and hash to Hex
@@ -54,26 +96,29 @@ class HashMaker():
             hashed_hex = hashed.hex()
 
             # Create the formatted output string
-            formatted_hash = f"scrypt:{n}:{r}:{p}${salt_b64}${hashed_hex}"
+            formatted_hash = f"$scrypt$n={n},r={r},p={p}${salt_b64}${hashed_hex}"
             hash_list.append(formatted_hash)
 
         return hash_list
 
 
-    def compute_pbkdf2(self, algorithm, salt_length, hash_length, iterations):
+    def compute_pbkdf2(self, algorithm, algo_text, iterations, salt_length, hash_length):
         hash_list = []
         
-        algorithm_name = "sha512" if algorithm.name == "sha512" else algorithm.name
-
         for password in self.passwords:
             salt = os.urandom(salt_length)
-            kdf = PBKDF2HMAC(algorithm=algorithm, length=hash_length, salt=salt, iterations=iterations)
+            kdf = PBKDF2HMAC(
+                algorithm=algorithm,
+                length=hash_length, 
+                salt=salt, 
+                iterations=iterations
+            )
             hashed = kdf.derive(password.encode())
             # Encode salt and hash with base64 and decode to string
             salt_b64 = base64.urlsafe_b64encode(salt).decode("utf-8")
             hashed_hex = hashed.hex()
             
-            hash_list.append(f"pbkdf2:{algorithm_name}:{iterations}${salt_b64}${hashed_hex}")
+            hash_list.append(f"$pbkdf2$a={algo_text},i={iterations}${salt_b64}${hashed_hex}")
         return hash_list
 
 
@@ -139,17 +184,18 @@ class HashMaker():
             )
 
             # Write the hashed data to the hash file
-            with open(hashed_password_filename, "w") as file:
+            with hashed_password_filename.open("w") as file:
                 for item in hashed:
                     file.write(f"{item}\n")
 
             # Write metadata to the metadata file
-            with open(metadata_filename, "w") as meta_file:
+            with metadata_filename.open("w") as meta_file:
                 for password, hash in zip(self.passwords, hashed):
-                    meta_file.write(f"Test password: {password}\n")
+                    meta_file.write(f"Password: {password}\n")
+                    meta_file.write(f"Hash: {hash}\n")
                     meta_file.write(f"Hashed using: {operation}\n")
-                    meta_file.write(f"Hash: {hash}\n\n")
-
+                    meta_file.write(f"Parameters: {self.parameters[operation]}\n\n")
+                    
             print(f"List saved to: {hashed_password_filename}")
             print(f"Metadata saved to: {metadata_filename}")
         except OSError as e:
@@ -178,6 +224,7 @@ def get_command_line_args():
         required=True
     )
     parser.add_argument("-t", "--test_mode", help="Test mode", action="store_true", default=False)
+    parser.add_argument("-s", "--secure_mode", help="Highly security mode", action="store_true", default=False)
     parser.add_argument("output_file", nargs="?", help="Specify output file name", type=str, default=None)
 
     return parser.parse_args()
@@ -202,31 +249,13 @@ def main():
         if more_passwords == "n":
             break
 
-    hash_maker = HashMaker(args.operation, passwords, args.output_file, args.test_mode)
-
-    if hash_maker.test_mode:
-        time_cost, memory_cost, parallelism = 1, 2**10, 1 # Argon
-        rounds = 5                  # Bcrypt
-        algorithm = hashes.SHA256() #PBKDF2
-        salt_length = 12            # Scrypt & PBDKF2
-        hash_length = 32            # Scrypt & PBKDF2
-        n, r, p = 32, 2**8, 8, 1    # Scrypt memory cost, block size, parallelism
-        iterations = 1000           # PBDKF2
-        
-    else:
-        time_cost, memory_cost, parallelism = 3, 2**14, 1 # Argon
-        rounds = 10                 # Bcrypt
-        algorithm = hashes.SHA512() # PBKDF2
-        salt_length = 16            # Scrypt & PBDKF2
-        hash_length = 64            # Scrypt & PBKDF2
-        n, r, p = 32768, 8, 1   #    Scrypt memory cost, block size, parallelism
-        iterations = 210000         # PBDKF2
+    hash_maker = HashMaker(args.operation, passwords, args.output_file, args.test_mode, args.secure_mode)
 
     commands = {
-        "argon": lambda: hash_maker.compute_argon(time_cost, memory_cost, parallelism),
-        "bcrypt": lambda: hash_maker.compute_bcrypt(rounds),
-        "scrypt": lambda: hash_maker.compute_scrypt(salt_length, hash_length, n, r, p),
-        "pbkdf2": lambda: hash_maker.compute_pbkdf2(algorithm, salt_length, hash_length, iterations),
+        "argon": lambda: hash_maker.compute_argon(**hash_maker.parameters["argon"]),
+        "bcrypt": lambda: hash_maker.compute_bcrypt(**hash_maker.parameters["bcrypt"]),
+        "scrypt": lambda: hash_maker.compute_scrypt(**hash_maker.parameters["scrypt"]),
+        "pbkdf2": lambda: hash_maker.compute_pbkdf2(**hash_maker.parameters["pbkdf2"]),
         "md5": lambda: hash_maker.compute_md5(),
         "ntlm": lambda: hash_maker.compute_ntlm(),
         "sha256": lambda: hash_maker.compute_sha256(),

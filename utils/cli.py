@@ -53,11 +53,6 @@ def load_args(config=None):
 
     # Common arguments
     parser.add_argument(
-        "hash_type",
-        choices=["argon", "bcrypt", "scrypt", "pbkdf2", "ntlm", "md5", "sha256", "sha512"],
-        help="Enter the hash function type you want to crack."
-    )
-    parser.add_argument(
         "target_file",
         help="Enter the hashed password file to crack."
     )
@@ -93,6 +88,17 @@ def load_args(config=None):
         type=str,
         help="Mask for mask-based attack (e.g., '?l?l?l?d' for three lowercase letters and a digit)."
     )
+    parser.add_argument(
+        "--custom",
+        type=str,
+        help="Custom string appended to end of mask (e.g., '2024')."
+    )
+    parser.add_argument(
+        "--phone",
+        action="store_true",
+        help="Adds phonetic rules to the mask crack, so that all combinations are pronounceable.",
+        default=None
+    )
 
     # Arguments specific to rule-based attack
     parser.add_argument(
@@ -117,7 +123,7 @@ def load_args(config=None):
         for key, value in config.items():
             if key == "operation":
                 simulated_args.append(f"--{value}")
-            elif key in ["hash_type", "target_file", "password_list"] and value is not None:
+            elif key in ["target_file", "password_list"] and value is not None:
                 simulated_args.append(value)
             elif value is not None:
                 simulated_args.extend([f"--{key}", str(value)])

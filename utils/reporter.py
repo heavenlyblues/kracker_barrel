@@ -30,6 +30,7 @@ def blinking_text(message, duration=3):
         sys.stdout.flush()
         time.sleep(0.5)
 
+
 # Function to display and log a summary
 def display_summary(found_flag, summary_log):
     """Display a clean summary of the run and log details."""

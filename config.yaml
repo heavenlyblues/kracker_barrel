@@ -1,38 +1,39 @@
 ## Rule-based attack
-operation: brut
-hash_type: md5  # Hash type to crack
-target_file: md5_brute_test.txt  # File containing hashed passwords (place in "data/")
-charset: ABCDEFGHIJKLMNOPQRSTUVWXY0123456789$.()+               # Charset for brute force (default: alphanumeric)
-min: 4
-max: 4
+# operation: brut
+# target_file: md5_brute_test.txt  # File containing hashed passwords (place in "data/")
+# charset: ABCDEFGHIJKLMNOPQRSTUVWXY0123456789$.()+               # Charset for brute force (default: alphanumeric)
+# min: 4
+# max: 6
 
 
-## Standard Dictionary Operation ##
-# operation: dict
-# hash_type: ntlm
-# target_file: ntlm_mask_test.txt
-# password_list: rockyou.txt
+# Standard Dictionary Operation ##
+operation: dict
+target_file: argon.txt
+password_list: rockyou_med.txt
 
 
-## Standard Mask-based Operation ##
+# Standard Mask-based Operation ##
 # operation: mask
-# hash_type: ntlm
-# target_file: ntlm_mask_test.txt
-# pattern: "?u?l?l?d?d?s"
+# target_file: bcrypt_test.txt
+# pattern: "?c?c?c?c?c?c?c?c?c"
+# custom: "c=cholate"
 
+# operation: brut
+# target_file: bcrypt_test.txt
+# charset: abc123
+# min: 2
+# max: 5
 
 # Configuration for Cracker Barrel Operations
 # Uncomment the relevant section for the desired operation and fill in the values.
 
 # ----- DICTIONARY ATTACK -----
 # operation: dict
-# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
 # target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
 # password_list: <dictionary.txt>      # File with potential passwords (place in "refs/")
 
 # ----- BRUTE FORCE ATTACK -----
 # operation: brut
-# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
 # target_file: <hashed_passwords.txt> # File containing hashed passwords (place in "data/")
 # charset: abcdef12345                # Charset for brute force (default: alphanumeric)
 # min: 1                              # Minimum password length
@@ -40,13 +41,11 @@ max: 4
 
 # ----- MASK-BASED ATTACK -----
 # operation: mask
-# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
 # target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
 # pattern: "?u?l?d"                    # Mask pattern (e.g., ?u = uppercase, ?l = lowercase, ?d = digit)
 
 # ----- RULE-BASED ATTACK -----
 # operation: rule
-# hash_type: <argon|bcrypt|scrypt|pbkdf2|ntlm|md5|sha256|sha512>  # Hash type to crack
 # target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
 # rules: <rules.txt>                 # File with transformation rules
 # wordlist1: <wordlist1.txt>         # Primary wordlist (place in "refs/")
@@ -54,19 +53,16 @@ max: 4
 
 # Examples:
 # operation: brut
-# hash_type: argon
 # target_file: argon_hashes.txt
 # charset: abcdef12345
 # min_length: 6
 # max_length: 8
 
 # operation: mask
-# hash_type: scrypt
 # target_file: scrypt_hashes.txt
 # mask: "?u?u?l?l?d"
 
 # operation: rule
-# hash_type: ntlm
 # target_file: ntlm_hashes.txt
 # rules: complex_rules.txt
 # wordlist1: common_passwords.txt
