@@ -1,6 +1,8 @@
+import atexit
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager, shared_memory
-import os, time
+import numpy as np
+import os, platform, time
 from pathlib import Path
 from tqdm import tqdm
 from core.hash_handler import HashHandler, crack_chunk_wrapper
@@ -12,6 +14,7 @@ from utils.reporter import display_summary, PURPLE, GREEN, LIGHT_YELLOW, DIM, RE
 
 class Kracker:
     def __init__(self, args):
+        self.memory_cleaned = False
         self.operation = args.operation # dict, brut, mask, rule
         self.target_file = Path ("data") / args.target_file
         self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
@@ -27,27 +30,46 @@ class Kracker:
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
         
+        self.max_password_size = 128  # Maximum password length in bytes
         self.batch_size = 2000  # Adjust batch size for performance
         self.batch_generator = None
         
         # Calculate shared memory size (batch size * max password length in bytes)
-        self.shared_mem_size = self.batch_size * 64  # Assuming max password length = 64 bytes
-        self.shared_mem = shared_memory.SharedMemory(create=True, size=self.shared_mem_size)
+        self.shared_memory_size = self.max_password_size * self.batch_size
+
+        # Create shared memory block
+        self.shared_mem = shared_memory.SharedMemory(create=True, size=self.shared_memory_size)
+
+        # Map shared memory to a NumPy array for easy handling
+        self.shared_array = np.ndarray((self.batch_size, self.max_password_size), dtype=np.uint8, buffer=self.shared_mem.buf)
+        atexit.register(self.cleanup_shared_memory_atexit)
 
         self.hash_handler = self.initialize_hash_handler()
         self.summary_log = self.initialize_summary_log()
 
     def __del__(self):
-        # Cleanup shared memory when the object is destroyed
-        self.cleanup_shared_memory()
+        try:
+            if hasattr(self, "memory_cleaned") and not self.memory_cleaned:
+                self.cleanup_shared_memory()
+        except Exception as e:
+            print(f"Error during object deletion: {e}")
 
     def cleanup_shared_memory(self):
-        if hasattr(self, "shared_mem") and self.shared_mem:
+        if not self.memory_cleaned and hasattr(self, "shared_mem") and self.shared_mem:
             try:
                 self.shared_mem.close()
-                self.shared_mem.unlink()  # Unlink to free the memory
+                self.shared_mem.unlink()
+                self.memory_cleaned = True
+            except FileNotFoundError:
+                print("Shared memory already unlinked.")
             except Exception as e:
                 print(f"Error cleaning up shared memory: {e}")
+
+    def cleanup_shared_memory_atexit(self):
+        try:
+            self.cleanup_shared_memory()
+        except Exception as e:
+            print(f"Error during shared memory cleanup at exit: {e}")
 
     def detect_hash_type(self):
         type_check = self.hash_digest_with_metadata[0].split("$", 2)[1]
@@ -132,7 +154,7 @@ class Kracker:
 
     def initialize_batch_generator(self):
         if self.operation == "dict":
-            self.batch_generator = yield_dictionary_batches(self.path_to_passwords, self.batch_size, self.shared_mem)
+            self.batch_generator = yield_dictionary_batches(self.path_to_passwords, self.batch_size)
         elif self.operation == "brut":
             generator = generate_brute_candidates(self.brute_settings)
             self.batch_generator = yield_brute_batches(generator, self.batch_size)
@@ -142,36 +164,52 @@ class Kracker:
         elif self.operation == "rule":
             pass
 
+    def write_to_shared_memory(self, batch):
+        for i, password_bytes in enumerate(batch):
+            self.shared_array[i, :len(password_bytes)] = np.frombuffer(password_bytes, dtype=np.uint8)
+            self.shared_array[i, len(password_bytes):] = 0  # Pad with zeros
+
+        # Clear remaining rows in shared memory (for unused slots)
+        for i in range(len(batch), self.batch_size):
+            self.shared_array[i, :] = 0
+        # Debugging statements
+        # print("Shared memory contents after writing:")
+        # print(self.shared_array[:len(batch)])  # Show only relevant rows
 
     def run(self):
         """Main loop to process password batches and handle matches."""
         print(self)  # Calls the __str__ method to print the configuration
 
+        atexit.register(self.cleanup_shared_memory_atexit)
+        
+        shared_name = self.shared_mem.name
+
         try:
-            with ProcessPoolExecutor(max_workers=6) as executor:
+            with ProcessPoolExecutor(max_workers=self.summary_log["workers"]) as executor:
                 self.initialize_batch_generator()
 
                 futures = []  # Queue to hold active Future objects
-                preload_limit = self.summary_log["workers"] * 2
+                preload_limit = self.summary_log["workers"] * 3
                 print(f"{LIGHT_YELLOW}Starting batch preloading...{RESET}", end=" ")
                 print(f"{DIM}Done!{RESET}")
 
                 # Initialize tqdm with total number of batches
-                with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
-                          total=self.summary_log["batches"], mininterval=0.1, smoothing=0.1, 
-                          ncols=100, leave=True, ascii=True) as progress_bar:
+                with tqdm(
+                    desc=f"{PURPLE}Batch Processing{RESET}", 
+                    total=self.summary_log["batches"], mininterval=0.1, smoothing=0.1, 
+                    ncols=100, leave=True, ascii=True
+                ) as progress_bar:
 
                     #  Submit batches to crack chunk and collect results in futures
                     for _ in range(preload_limit):
                         try:
                             batch = next(self.batch_generator)
                             # Write batch to shared memory
-                            self.shared_mem.buf[:len(batch)] = b"\n".join(batch).ljust(self.shared_mem_size, b"\x00")
+                            self.write_to_shared_memory(batch)
                             future = executor.submit(
                                 crack_chunk_wrapper,
-                                self.hash_type,
-                                self.hash_digest_with_metadata,
-                                self.shared_mem.name,
+                                shared_name, self.batch_size, self.max_password_size, 
+                                self.hash_type, self.hash_digest_with_metadata,
                                 self.found_flag
                             )
                             futures.append(future)
@@ -196,12 +234,11 @@ class Kracker:
                                 if len(futures) < preload_limit:
                                     try:
                                         batch = next(self.batch_generator)
-                                        self.shared_mem.buf[:len(batch)] = b"\n".join(batch).ljust(self.share_mem_size, b"\x00")
+                                        self.write_to_shared_memory(batch)
                                         new_future = executor.submit(
                                             crack_chunk_wrapper,
-                                            self.hash_type,
-                                            self.hash_digest_with_metadata,
-                                            self.shared_mem.name,
+                                            shared_name, self.batch_size, self.max_password_size, 
+                                            self.hash_type, self.hash_digest_with_metadata,
                                             self.found_flag
                                         )
                                         futures.append(new_future)

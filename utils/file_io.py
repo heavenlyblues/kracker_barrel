@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-from multiprocessing import shared_memory
+
 
 # Load input file with target hash
 def load_target_hash(target_filepath):
@@ -24,21 +24,17 @@ def load_target_hash(target_filepath):
 
 
 # Generator function to load the wordlist in batches
-def yield_dictionary_batches(path_to_passwords, batch_size, shared_mem):
+def yield_dictionary_batches(path_to_passwords, batch_size):
     try:
         with path_to_passwords.open("r", encoding="latin-1") as file:
-            buffer = shared_mem.buf
             batch = []
             for line in file:
                 batch.append(line.strip().encode())
                 if len(batch) >= batch_size:
-                    # Write batch to shared memory
-                    buffer[:len(batch)] = b"\n".join(batch)
-                    yield len(batch)  # Yield the size of the batch
-                    batch = []
-            if batch:
-                buffer[:len(batch)] = b"\n".join(batch)
-                yield len(batch)
+                    yield batch  # Yield a full batch of passwords
+                    batch = []  # Reset batch for the next set of lines
+            if batch:  # Yield any remaining lines as the final batch
+                yield batch
 
     except FileNotFoundError:
         print(f"{path_to_passwords} - File not found.")

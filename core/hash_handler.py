@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes
 import hashlib
 import logging
 from multiprocessing import shared_memory
+import numpy as np
 
 
 
@@ -137,7 +138,9 @@ class Argon2Handler(HashHandler):
         for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
             try:
                 # Derive the hash and compare with the target
-                if processor.verify(target_hash, potential_password_match):
+                print(f"Target hash: {target_hash}")
+                print(f"Password: {potential_password_match}")
+                if processor.verify(target_hash, potential_password_match.encode()):
                     return potential_password_match.decode()  # Match found
             except Exception:
                 # Continue to the next hash if verification fails
@@ -503,7 +506,7 @@ class BcryptHandler(HashHandler):
                 target_hash = entry["full_hash"]
                 # Use bcrypt's checkpw function to verify the password
                 if bcrypt.checkpw(potential_password_match.encode("utf-8"), target_hash):
-                    return potential_password_match.decode()  # Return on first match
+                    return potential_password_match  # Return on first match
             return None  # No matches found after checking all hashes
         except bcrypt.error as e:
             print(f"Error during bcrypt verification: {e}")
@@ -761,33 +764,60 @@ def get_hash_handler(hash_type, hash_digest_with_metadata):
         raise ValueError(f"Error determining hash type or handler: {e}")
     
 
-def crack_chunk_wrapper(hash_type, hash_digest_with_metadata, shared_mem_name, found_flag):
+def crack_chunk_wrapper(shared_name, batch_size, max_pwd_size, hash_type, hash_digest_with_metadata, found_flag):
     """
     Worker function that processes a password batch from shared memory.
 
     Args:
+        shared_name (str): Name of the shared memory segment.
+        batch_size (int): Number of passwords in the batch.
+        max_pwd_size (int): Maximum password size in bytes.
         hash_type (str): Type of the hash being cracked.
         hash_digest_with_metadata (list): Target hashes with metadata.
-        shared_mem_name (str): Name of the shared memory segment.
         found_flag (dict): Shared dictionary for tracking matches.
 
     Returns:
         tuple: (list of matched passwords, number of passwords processed)
     """
-    # Attach to the shared memory segment
-    shared_mem = shared_memory.SharedMemory(name=shared_mem_name)
-    buffer = shared_mem.buf.tobytes().strip(b"\x00")  # Read the shared memory buffer, stripping padding
-    passwords = buffer.split(b"\n")  # Split into individual passwords
+    # Attach to shared memory
+    existing_shm = shared_memory.SharedMemory(name=shared_name)
+    shared_array = np.ndarray((batch_size, max_pwd_size), dtype=np.uint8, buffer=existing_shm.buf)
+
+    # Debug: log raw shared memory data
+    # print("Raw shared memory contents in worker:")
+    # print(shared_array)
+
+    # Extract passwords from shared memory
+    passwords = []
+    for row in shared_array:
+        password_bytes = row.tobytes()
+        password = password_bytes.split(b'\x00', 1)[0].decode('utf-8')  # Decode and strip null bytes
+        if password:  # Ignore empty rows
+            passwords.append(password)
+    
+    # print(f"Passwords in batch: {passwords}") # DEBUG
 
     # Delegate to the main cracking logic
     results, chunk_count = crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag)
 
     # Detach from shared memory
-    shared_mem.close()
+    existing_shm.close()
     return results, chunk_count
 
 
 def crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag):
+    """
+    Main cracking logic that processes a batch of passwords.
+
+    Args:
+        hash_type (str): Type of the hash being cracked.
+        hash_digest_with_metadata (list): Target hashes with metadata.
+        passwords (list): List of passwords to check.
+        found_flag (dict): Shared dictionary for tracking matches.
+
+    Returns:
+        tuple: (list of matched passwords, number of passwords processed)
+    """
     chunk_count = 0
     results = []
 
@@ -800,13 +830,16 @@ def crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag):
     hash_handler.parse_hash_digest_with_metadata()
 
     # Process each password in the batch
-    for potential_password_match in passwords:
+    for password in passwords:
+        # Exit early if goal is reached
         if found_flag["found"] >= found_flag["goal"]:
             return results, chunk_count
 
         chunk_count += 1
-        matched_passwords = hash_handler.verify(potential_password_match)
-        if matched_passwords is not None:
+
+        # Verify password and collect results if matched
+        matched_passwords = hash_handler.verify(password)
+        if matched_passwords:
             results.append(matched_passwords)
 
     return results, chunk_count
