@@ -8,8 +8,8 @@
 
 # Standard Dictionary Operation ##
 operation: dict
-target_file: argon.txt
-password_list: rockyou_med.txt
+target_file: argon_test_good_1732491656.txt
+password_list: rockyou_tiny.txt
 
 
 # Standard Mask-based Operation ##

@@ -1,6 +1,6 @@
 import argparse
 import base64
-from datetime import time
+import time
 import os
 from pathlib import Path
 from argon2 import PasswordHasher
@@ -19,7 +19,7 @@ class HashMaker():
     def __init__(self, operation, passwords, output_file, test_mode, secure_mode):
         self.operation = operation
         self.passwords = passwords
-        self.output_file = output_file
+        self.output_file = Path(output_file)
         self.file_path = None
         self.test_mode = test_mode
         self.secure_mode = secure_mode

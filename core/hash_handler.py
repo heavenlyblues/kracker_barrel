@@ -135,6 +135,8 @@ class Argon2Handler(HashHandler):
         for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
             try:
                 # Derive the hash and compare with the target
+                print(target_hash)
+                print(potential_password_match)
                 if processor.verify(target_hash, potential_password_match):
                     return potential_password_match.decode()  # Match found
             except Exception:
