@@ -5,7 +5,7 @@ import numpy as np
 import os, platform, time
 from pathlib import Path
 from tqdm import tqdm
-from core.hash_handler import HashHandler, crack_chunk_wrapper
+from core.hash_handler import HashHandler
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
@@ -33,7 +33,7 @@ class Kracker:
         self.max_password_size = 128  # Maximum password length in bytes
         self.batch_size = 2000  # Adjust batch size for performance
         self.batch_generator = None
-        
+
         # Calculate shared memory size (batch size * max password length in bytes)
         self.shared_memory_size = self.max_password_size * self.batch_size
 
@@ -42,6 +42,7 @@ class Kracker:
 
         # Map shared memory to a NumPy array for easy handling
         self.shared_array = np.ndarray((self.batch_size, self.max_password_size), dtype=np.uint8, buffer=self.shared_mem.buf)
+        
         atexit.register(self.cleanup_shared_memory_atexit)
 
         self.hash_handler = self.initialize_hash_handler()
@@ -162,19 +163,28 @@ class Kracker:
             generator = generate_mask_candidates(self.mask_pattern, self.custom_strings)
             self.batch_generator = yield_maskbased_batches(generator, self.batch_size)
         elif self.operation == "rule":
-            pass
+            raise NotImplementedError("Rule-based attack is not implemented.")
+        print(f"Batch generator initialized: {self.batch_generator}")
+
+    # def init_worker(worker_id):
+    #     global WORKER_ID
+    #     WORKER_ID = worker_id  # Store worker ID in global variable
 
     def write_to_shared_memory(self, batch):
-        for i, password_bytes in enumerate(batch):
-            self.shared_array[i, :len(password_bytes)] = np.frombuffer(password_bytes, dtype=np.uint8)
-            self.shared_array[i, len(password_bytes):] = 0  # Pad with zeros
+        print(f"Writing batch of size {len(batch)} to shared memory")
+        for i, password in enumerate(batch):
+            # Convert password to bytes and store it in the shared array    
+            # print(f"Worker {worker_id} processing password index {i}: {password}")
+            self.shared_array[i, :len(password)] = np.frombuffer(password, dtype=np.uint8)
+            self.shared_array[i, len(password):] = 0  # Zero out the remaining space
 
-        # Clear remaining rows in shared memory (for unused slots)
+        # Clear any unused rows in the shared memory
         for i in range(len(batch), self.batch_size):
             self.shared_array[i, :] = 0
-        # Debugging statements
-        # print("Shared memory contents after writing:")
-        # print(self.shared_array[:len(batch)])  # Show only relevant rows
+
+        # Debug the written data
+        print(f"Shared memory contents after writing batch:")
+        print(self.shared_array[:len(batch)])
 
     def run(self):
         """Main loop to process password batches and handle matches."""
@@ -182,8 +192,6 @@ class Kracker:
 
         atexit.register(self.cleanup_shared_memory_atexit)
         
-        shared_name = self.shared_mem.name
-
         try:
             with ProcessPoolExecutor(max_workers=self.summary_log["workers"]) as executor:
                 self.initialize_batch_generator()
@@ -204,12 +212,15 @@ class Kracker:
                     for _ in range(preload_limit):
                         try:
                             batch = next(self.batch_generator)
+                            print(f"Preloading batch: {batch[:5]}...")  # Debug log
                             # Write batch to shared memory
                             self.write_to_shared_memory(batch)
+                            
+
                             future = executor.submit(
-                                crack_chunk_wrapper,
-                                shared_name, self.batch_size, self.max_password_size, 
-                                self.hash_type, self.hash_digest_with_metadata,
+                                self.hash_handler.crack_chunk_wrapper,
+                                self.shared_mem.name, 
+                                self.batch_size, self.max_password_size, 
                                 self.found_flag
                             )
                             futures.append(future)
@@ -234,11 +245,13 @@ class Kracker:
                                 if len(futures) < preload_limit:
                                     try:
                                         batch = next(self.batch_generator)
+                                        print(f"Submitting batch: {len(batch)} passwords")
                                         self.write_to_shared_memory(batch)
+
                                         new_future = executor.submit(
-                                            crack_chunk_wrapper,
-                                            shared_name, self.batch_size, self.max_password_size, 
-                                            self.hash_type, self.hash_digest_with_metadata,
+                                            self.hash_handler.crack_chunk_wrapper,
+                                            self.shared_mem.name, self.batch_size, 
+                                            self.max_password_size, 
                                             self.found_flag
                                         )
                                         futures.append(new_future)

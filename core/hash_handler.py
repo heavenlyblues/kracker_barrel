@@ -7,8 +7,8 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import hashlib
-import logging
-from multiprocessing import shared_memory
+import os
+from multiprocessing import Semaphore, shared_memory
 import numpy as np
 
 
@@ -21,11 +21,13 @@ class HashHandler:
         "sha1": hashes.SHA1,
         # Add more algorithms as needed
     }
+    SEMAPHORE = Semaphore()
 
     def __init__(self, hash_digest_with_metadata):
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.target_hash_to_crack = []
         self.parameters = []
+
 
     def parse_algorithm(self, algorithm_name):
         """
@@ -54,6 +56,86 @@ class HashHandler:
         
     def log_parameters(self):
         raise NotImplementedError("Subclasses must implement this method.")
+
+    def crack_chunk_wrapper(self, shm_name, batch_size, max_pwd_size, found_flag):
+        """
+        Worker function that processes a password batch from shared memory.
+
+        Args:
+            shm_name (str): Name of the shared memory segment.
+            batch_size (int): Number of passwords in the batch.
+            max_pwd_size (int): Maximum password size in bytes.
+            found_flag (dict): Shared dictionary for tracking matches.
+
+        Returns:
+            tuple: (list of matched passwords, number of passwords processed)
+        """
+        shm = None
+        try:
+            # Attach to shared memory
+            shm = shared_memory.SharedMemory(name=shm_name)
+            shared_array = np.ndarray((batch_size, max_pwd_size), dtype=np.uint8, buffer=shm.buf)
+
+            # Synchronize access to shared memory with semaphore
+            HashHandler.SEMAPHORE.acquire()
+            try:
+                passwords = [
+                    bytes(shared_array[i]).decode('utf-8').rstrip('\x00') 
+                    for i in range(batch_size) 
+                    if shared_array[i, 0] != 0  # Ignore empty rows
+                ]
+            finally:
+                HashHandler.SEMAPHORE.release()
+            
+            print(f"Worker {os.getpid()} processing passwords: {passwords[:5]}...")
+
+            # Perform password cracking
+            results, chunk_count = self.crack_chunk(passwords, found_flag)
+
+            return results, chunk_count
+
+        except Exception as e:
+            print(f"Error in crack_chunk_wrapper: {e}")
+            return [], 0
+
+        finally:
+            if shm:
+                shm.close()
+
+
+    def crack_chunk(self, passwords, found_flag):
+        """
+        Main cracking logic that processes a batch of passwords.
+
+        Args:
+            passwords (list): List of passwords to check.
+            found_flag (dict): Shared dictionary for tracking matches.
+
+        Returns:
+            tuple: (list of matched passwords, number of passwords processed)
+        """
+        print(f"Processing passwords in chunk: {passwords[:10]}")  # Debug first 10 passwords
+        chunk_count = 0
+        results = []
+
+        # Early exit if all hashes are already cracked
+        if found_flag["found"] >= found_flag["goal"]:
+            return results, chunk_count
+
+        # Process each password in the batch
+        for password in passwords:
+            # Exit early if goal is reached
+            if found_flag["found"] >= found_flag["goal"]:
+                return results, chunk_count
+
+            chunk_count += 1
+
+            # Verify password and collect results if matched
+            matched_passwords = self.verify(password)
+            if matched_passwords:
+                results.append(matched_passwords)
+
+        return results, chunk_count
 
 
 class Argon2Handler(HashHandler):
@@ -138,10 +220,11 @@ class Argon2Handler(HashHandler):
         for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
             try:
                 # Derive the hash and compare with the target
-                print(f"Target hash: {target_hash}")
-                print(f"Password: {potential_password_match}")
-                if processor.verify(target_hash, potential_password_match.encode()):
-                    return potential_password_match.decode()  # Match found
+                # print(f"Target hash: {target_hash}")
+                # print(f"Password: {potential_password_match}")
+                encoded_password = potential_password_match.encode()
+                if processor.verify(target_hash, encoded_password):
+                    return potential_password_match  # Match found
             except Exception:
                 # Continue to the next hash if verification fails
                 continue
@@ -741,105 +824,26 @@ HashHandler.SHA256Handler = SHA256Handler
 HashHandler.SHA512Handler = SHA512Handler
 
 
-def get_hash_handler(hash_type, hash_digest_with_metadata):
-    hash_handlers = {
-        "argon": lambda x: Argon2Handler(x),
-        "scrypt": lambda x: ScryptHandler(x),
-        "pbkdf2": lambda x: PBKDF2Handler(x),
-        "bcrypt": lambda x: BcryptHandler(x),
-        "ntlm": lambda x: NTLMHandler(x),
-        "md5": lambda x: MD5Handler(x),
-        "sha256": lambda x: SHA256Handler(x), 
-        "sha512": lambda x: SHA512Handler(x)
-    }
-    try:
-        handler = hash_handlers.get(hash_type)
+# def get_hash_handler(hash_type, hash_digest_with_metadata):
+#     hash_handlers = {
+#         "argon": lambda x: Argon2Handler(x),
+#         "scrypt": lambda x: ScryptHandler(x),
+#         "pbkdf2": lambda x: PBKDF2Handler(x),
+#         "bcrypt": lambda x: BcryptHandler(x),
+#         "ntlm": lambda x: NTLMHandler(x),
+#         "md5": lambda x: MD5Handler(x),
+#         "sha256": lambda x: SHA256Handler(x), 
+#         "sha512": lambda x: SHA512Handler(x)
+#     }
+#     try:
+#         handler = hash_handlers.get(hash_type)
         
-        if not handler:
-            raise ValueError(f"No handler found for hash type: {hash_type}")
+#         if not handler:
+#             raise ValueError(f"No handler found for hash type: {hash_type}")
 
-        return handler(hash_digest_with_metadata)
+#         return handler(hash_digest_with_metadata)
    
-    except ValueError as e:
-        raise ValueError(f"Error determining hash type or handler: {e}")
+#     except ValueError as e:
+#         raise ValueError(f"Error determining hash type or handler: {e}")
     
 
-def crack_chunk_wrapper(shared_name, batch_size, max_pwd_size, hash_type, hash_digest_with_metadata, found_flag):
-    """
-    Worker function that processes a password batch from shared memory.
-
-    Args:
-        shared_name (str): Name of the shared memory segment.
-        batch_size (int): Number of passwords in the batch.
-        max_pwd_size (int): Maximum password size in bytes.
-        hash_type (str): Type of the hash being cracked.
-        hash_digest_with_metadata (list): Target hashes with metadata.
-        found_flag (dict): Shared dictionary for tracking matches.
-
-    Returns:
-        tuple: (list of matched passwords, number of passwords processed)
-    """
-    # Attach to shared memory
-    existing_shm = shared_memory.SharedMemory(name=shared_name)
-    shared_array = np.ndarray((batch_size, max_pwd_size), dtype=np.uint8, buffer=existing_shm.buf)
-
-    # Debug: log raw shared memory data
-    # print("Raw shared memory contents in worker:")
-    # print(shared_array)
-
-    # Extract passwords from shared memory
-    passwords = []
-    for row in shared_array:
-        password_bytes = row.tobytes()
-        password = password_bytes.split(b'\x00', 1)[0].decode('utf-8')  # Decode and strip null bytes
-        if password:  # Ignore empty rows
-            passwords.append(password)
-    
-    # print(f"Passwords in batch: {passwords}") # DEBUG
-
-    # Delegate to the main cracking logic
-    results, chunk_count = crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag)
-
-    # Detach from shared memory
-    existing_shm.close()
-    return results, chunk_count
-
-
-def crack_chunk(hash_type, hash_digest_with_metadata, passwords, found_flag):
-    """
-    Main cracking logic that processes a batch of passwords.
-
-    Args:
-        hash_type (str): Type of the hash being cracked.
-        hash_digest_with_metadata (list): Target hashes with metadata.
-        passwords (list): List of passwords to check.
-        found_flag (dict): Shared dictionary for tracking matches.
-
-    Returns:
-        tuple: (list of matched passwords, number of passwords processed)
-    """
-    chunk_count = 0
-    results = []
-
-    # Early exit if all hashes are already cracked
-    if found_flag["found"] >= found_flag["goal"]:
-        return results, chunk_count
-
-    # Initialize the hash handler
-    hash_handler = get_hash_handler(hash_type, hash_digest_with_metadata)
-    hash_handler.parse_hash_digest_with_metadata()
-
-    # Process each password in the batch
-    for password in passwords:
-        # Exit early if goal is reached
-        if found_flag["found"] >= found_flag["goal"]:
-            return results, chunk_count
-
-        chunk_count += 1
-
-        # Verify password and collect results if matched
-        matched_passwords = hash_handler.verify(password)
-        if matched_passwords:
-            results.append(matched_passwords)
-
-    return results, chunk_count
