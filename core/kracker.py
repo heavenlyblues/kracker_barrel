@@ -10,6 +10,7 @@ from utils.file_io import get_number_of_passwords, yield_dictionary_batches, loa
 from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
 
 
+
 class Kracker:
     def __init__(self, args):
         self.operation = args.operation # dict, brut, mask, rule
@@ -17,21 +18,18 @@ class Kracker:
         self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
         self.hash_type = self.detect_hash_type() # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
-        
         self.mask_pattern = args.pattern # Mask-based attack
         self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
         self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
-
+        self.workers = os.cpu_count()
+        self.batch_size = 2000  # Adjust batch size for performance
+        
+        self.hash_handler = self.initialize_hash_handler()
+        
         self.manager = Manager()
         self.start_time = time.time()
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
-        
-        self.batch_size = 2000  # Adjust batch size for performance
-        self.batch_generator = None
-
-        self.hash_handler = self.initialize_hash_handler()
-        self.summary_log = self.initialize_summary_log()
 
 
     def detect_hash_type(self):
@@ -48,14 +46,12 @@ class Kracker:
             "sha256": "sha256",
             "sha512": "sha512"
         }
-
         # Return the mapped hash type or raise an error for unknown types
         try:
             return hash_map[type_check]
         except KeyError:
             raise ValueError(f"Unknown hash format: {type_check}")
-
-
+        
     def initialize_hash_handler(self):
         handlers = {
             "argon": HashHandler.Argon2Handler,
@@ -76,56 +72,37 @@ class Kracker:
             raise ValueError(f"Error determining hash type or handler: {e}")
 
 
-    def __str__(self):
-        return (
-            f"\n{PURPLE}Kracker Configuration:{RESET}\n"
-            f"  Operation: {self.operation}\n"
-            f"  Target: {self.target_file}\n"
-            f"  Hash type: {self.hash_type}\n"
-            f"  Password list: {self.path_to_passwords}\n"
-            f"  Batch size: {self.batch_size}\n"
-            f"  Workers: {self.summary_log["workers"]}\n"
-        )
-
-
-    def initialize_summary_log(self):
-        if self.operation == "dict":
-            number_of_passwords = get_number_of_passwords(self.path_to_passwords)
-        elif self.operation == "brut":
-            number_of_passwords = get_brute_count(self.brute_settings)
-        elif self.operation == "mask":
-            number_of_passwords = get_mask_count(self.mask_pattern, self.custom_strings)
-        elif self.operation == "rule":
-            number_of_passwords = 1
-
-        
-        total_batches = (number_of_passwords // self.batch_size) + 1
-        
-        return {
-            "operation": self.operation,
-            "input_file": self.target_file,
-            "hash_type": self.hash_type,
-            "file_scanned": self.path_to_passwords,
-            "workers": os.cpu_count(),
-            "batches": total_batches,
-            "batch_size": self.batch_size,
-            "items": number_of_passwords,
-            "total_count": 0,
-            "pwned": []
-        }
-
+class BatchManager:
+    def __init__(self, kracker):
+        self.kracker = kracker
+        self.batch_generator = self.initialize_batch_generator()
+        self.total_batches = None
+        self.total_passwords = None
 
     def initialize_batch_generator(self):
-        if self.operation == "dict":
-            self.batch_generator = yield_dictionary_batches(self.path_to_passwords, self.batch_size)
-        elif self.operation == "brut":
-            generator = generate_brute_candidates(self.brute_settings)
-            self.batch_generator = yield_brute_batches(generator, self.batch_size)
-        elif self.operation == "mask":
-            generator = generate_mask_candidates(self.mask_pattern, self.custom_strings)
-            self.batch_generator = yield_maskbased_batches(generator, self.batch_size)
-        elif self.operation == "rule":
+        if self.kracker.operation == "dict":
+            self.batch_generator = yield_dictionary_batches(self.kracker.path_to_passwords, self.kracker.batch_size)
+            self.total_passwords = get_number_of_passwords(self.kracker.path_to_passwords)
+
+        elif self.kracker.operation == "brut":
+            generator = generate_brute_candidates(self.kracker.brute_settings)
+            self.batch_generator = yield_brute_batches(generator, self.bkracker.atch_size)
+
+        elif self.kracker.operation == "mask":
+            generator = generate_mask_candidates(self.mask_pattern, self.kracker.custom_strings)
+            self.batch_generator = yield_maskbased_batches(generator, self.kracker.batch_size)
+
+        elif self.kracker.operation == "rule":
             pass
+        
+        self.total_batches = -(-self.total_passwords // self.kracker.batch_size)
+
+
+class Workers:
+    def __init__(self, kracker, batch_manager, reporter):
+        self.kracker = kracker
+        self.batch_manager = batch_manager
+        self.reporter = reporter  # Reporter instance for logging
 
 
     def run(self):
@@ -134,25 +111,25 @@ class Kracker:
 
         try:
             with ProcessPoolExecutor(max_workers=6) as executor:
-                self.initialize_batch_generator()
+                self.batch_manager.initialize_batch_generator()
 
                 futures = []  # Queue to hold active Future objects
-                preload_limit = self.summary_log["workers"] * 2
+                preload_limit = self.kracker.workers * 2
                 print(f"{LIGHT_YELLOW}Starting batch preloading...{RESET}", end=" ")
                 print(f"{DIM}Done!{RESET}")
 
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
-                          total=self.summary_log["batches"], mininterval=0.1, smoothing=0.1, 
+                          total=self.batch_manager.total_batches, mininterval=0.1, smoothing=0.1, 
                           ncols=100, leave=True, ascii=True) as progress_bar:
 
                     #  Submit batches to crack chunk and collect results in futures
                     for _ in range(preload_limit):
                         try:
-                            chunk = next(self.batch_generator)
-                            future = executor.submit(crack_chunk_wrapper, self.hash_type, 
-                                                     self.hash_digest_with_metadata, chunk, 
-                                                     self.found_flag)
+                            chunk = next(self.batch_manager.batch_generator)
+                            future = executor.submit(crack_chunk_wrapper, self.kracker.hash_type, 
+                                                     self.kracker.hash_digest_with_metadata, chunk, 
+                                                     self.kracker.found_flag)
                             futures.append(future)
                         except StopIteration:  # Once batches are consumed, generator raises a StopIteration exception
                             break  # No more batches to preload
@@ -166,18 +143,18 @@ class Kracker:
                                 progress_bar.update(1) # Update the progress bar
 
                                 # Stop if all the target hashes are matched 
-                                if self.found_flag["found"] == self.found_flag["goal"]:
+                                if self.kracker.found_flag["found"] == self.kracker.found_flag["goal"]:
                                     progress_bar.close()  # Ensure progress bar closes cleanly
-                                    self.final_summary()
+                                    self.reporter.final_summary()
                                     return  # Exit immediately
 
                                 # Dynamically preload new batches as space frees up
                                 if len(futures) < preload_limit:
                                     try:
-                                        chunk = next(self.batch_generator)
-                                        new_future = executor.submit(crack_chunk_wrapper, self.hash_type, 
-                                                                     self.hash_digest_with_metadata, chunk, 
-                                                                     self.found_flag)
+                                        chunk = next(self.batch_manager.batch_generator)
+                                        new_future = executor.submit(crack_chunk_wrapper, self.kracker.hash_type, 
+                                                                     self.kracker.hash_digest_with_metadata, chunk, 
+                                                                     self.kracker.found_flag)
                                         futures.append(new_future)
                                     except StopIteration: # Generator raises a StopIteration exception
                                         pass  # No more batches to load
@@ -186,13 +163,13 @@ class Kracker:
                             finally:
                                 futures.remove(future)
                     progress_bar.close()  # Ensure progress bar closes cleanly
-            self.final_summary()
+            self.reporter.final_summary()
 
         except KeyboardInterrupt:
-            self.found_flag["found"] = -1
-            self.summary_log["message"] = "Process interrupted. Partial summary_log displayed."
-            self.summary_log["elapsed_time"] = time.time() - self.start_time
-            display_summary(self.found_flag, self.summary_log)
+            self.kracker.found_flag["found"] = -1
+            self.reporter.summary_log["message"] = "Process interrupted. Partial summary_log displayed."
+            self.reporter.summary_log["elapsed_time"] = time.time() - self.kracker.start_time
+            display_summary(self.kracker.found_flag, self.reporter.summary_log)
 
 
     # Process the resluts from completed futures
@@ -200,17 +177,13 @@ class Kracker:
         """Process the result of a completed future."""
         try:
             results, chunk_count = task_result.result()  # Expecting a tuple
-            self.summary_log["total_count"] += chunk_count
+            self.reporter.summary_log["total_count"] += chunk_count
 
             # Process all matches in the results list
             for pwned_pwd in results:
-                self.summary_log["pwned"].append(pwned_pwd)
-                self.found_flag["found"] += 1
+                self.reporter.summary_log["pwned"].append(pwned_pwd)
+                self.kracker.found_flag["found"] += 1
                 tqdm.write(f"{GREEN}[MATCH] Password found: {pwned_pwd}{RESET}")
-
-            # # If no matches were found
-            # if not results:
-            #     tqdm.write(f"{LIGHT_YELLOW}[INFO] No matches found in this chunk.{RESET}")
 
             return True, chunk_count
         except Exception as e:
@@ -222,26 +195,70 @@ class Kracker:
         return False, chunk_count
 
 
+class Reporter:
+    def __init__(self, kracker):
+        self.kracker = kracker
+        self.summary_log = self.initialize_summary_log()
+
+
+    def __str__(self):
+        return (
+            f"\n{PURPLE}Kracker Configuration:{RESET}\n"
+            f"  Operation: {self.kracker.operation}\n"
+            f"  Target: {self.kracker.target_file}\n"
+            f"  Hash type: {self.kracker.hash_type}\n"
+            f"  Password list: {self.kracker.path_to_passwords}\n"
+            f"  Batch size: {self.kracker.batch_size}\n"
+            f"  Workers: {self.summary_log["workers"]}\n"
+        )
+
+
+    def initialize_summary_log(self):
+        if self.kracker.operation == "dict":
+            number_of_passwords = get_number_of_passwords(self.kracker.path_to_passwords)
+        elif self.kracker.operation == "brut":
+            number_of_passwords = get_brute_count(self.kracker.brute_settings)
+        elif self.kracker.operation == "mask":
+            number_of_passwords = get_mask_count(self.kracker.mask_pattern, self.kracker.custom_strings)
+        elif self.kracker.operation == "rule":
+            number_of_passwords = 1
+
+        total_batches = (number_of_passwords // self.kracker.batch_size) + 1
+        
+        return {
+            "operation": self.kracker.operation,
+            "input_file": self.kracker.target_file,
+            "hash_type": self.kracker.hash_type,
+            "file_scanned": self.kracker.path_to_passwords,
+            "workers": self.kracker.workers,
+            "batches": total_batches,
+            "batch_size": self.kracker.batch_size,
+            "items": number_of_passwords,
+            "total_count": 0,
+            "pwned": []
+        }
+
+
     def final_summary(self):
         """Display final summary after processing is completed."""
         # Retrieve hash parameters
-        self.summary_log["hash_parameters"] = self.hash_handler.log_parameters()
+        self.summary_log["hash_parameters"] = self.kracker.hash_handler.log_parameters()
 
         # Construct the final message based on results
-        if self.found_flag["found"] == 0:
+        if self.kracker.found_flag["found"] == 0:
             self.summary_log["message"] = (
                 "No match found in word list. Program terminated."
             )
-        elif self.found_flag["found"] < self.found_flag["goal"]:
+        elif self.kracker.found_flag["found"] < self.kracker.found_flag["goal"]:
             self.summary_log["message"] = (
-                f"{self.found_flag['found']} of {self.found_flag['goal']} "
+                f"{self.kracker.found_flag['found']} of {self.kracker.found_flag['goal']} "
                 "match(es) found in word list. Program terminated."
             )
         else:
             self.summary_log["message"] = (
-                f"{self.found_flag['found']} of {self.found_flag['goal']} "
+                f"{self.kracker.found_flag['found']} of {self.kracker.found_flag['goal']} "
                 "match(es) found in word list."
             )
 
-        self.summary_log["elapsed_time"] = time.time() - self.start_time
-        display_summary(self.found_flag, self.summary_log)
+        self.summary_log["elapsed_time"] = time.time() - self.kracker.start_time
+        display_summary(self.kracker.found_flag, self.summary_log)

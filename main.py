@@ -1,4 +1,4 @@
-from core.kracker import Kracker
+from core.kracker import Kracker, BatchManager, Workers, Reporter
 from utils.cli import load_args, load_config
 import datetime
 import cProfile
@@ -11,16 +11,14 @@ if __name__ == "__main__":
     profiler.enable()
 
     # Load configuration from YAML file
-    config = load_config() # <-- Add custom config if desired
+    args = load_args(load_config()) # <-- Add custom config if desired
+    kracker = Kracker(args)
+    batch_manager = BatchManager(kracker)
+    reporter = Reporter(kracker)
+    workers = Workers(kracker, batch_manager, reporter)
 
-    # Parse arguments, with config as defaults
-    args = load_args(config)
 
-    # Pass parsed arguments to Kracker
-    cracker = Kracker(args)
-
-    # Run the cracking process
-    cracker.run()
+    workers.run()
 
     # Create profiling file with time stame
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

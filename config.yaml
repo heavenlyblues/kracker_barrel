@@ -8,7 +8,7 @@
 
 # Standard Dictionary Operation ##
 operation: dict
-target_file: argon_test_good_1732491656.txt
+target_file: argon_test3.txt
 password_list: rockyou_med.txt
 
 
