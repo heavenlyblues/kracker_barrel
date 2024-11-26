@@ -1,6 +1,8 @@
 from core.kracker import Kracker
 from utils.cli import load_args, load_config
+import datetime
 import cProfile
+from pathlib import Path
 
 
 if __name__ == "__main__":
@@ -20,6 +22,10 @@ if __name__ == "__main__":
     # Run the cracking process
     cracker.run()
 
-    # Stop profiling and save results to a file
+    # Create profiling file with time stame
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    profiling_dir = Path("profiling")
+    profiling_dir.mkdir(exist_ok=True)
+    filename = profiling_dir / f"profile_results_{timestamp}.prof"
     profiler.disable()
-    profiler.dump_stats('profile_results_1123a.prof')
+    profiler.dump_stats(filename)
