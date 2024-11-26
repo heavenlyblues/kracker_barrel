@@ -7,10 +7,6 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import hashlib
-import os
-from multiprocessing import Semaphore, shared_memory
-import numpy as np
-
 
 
 class HashHandler:
@@ -21,13 +17,11 @@ class HashHandler:
         "sha1": hashes.SHA1,
         # Add more algorithms as needed
     }
-    SEMAPHORE = Semaphore()
 
     def __init__(self, hash_digest_with_metadata):
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.target_hash_to_crack = []
         self.parameters = []
-
 
     def parse_algorithm(self, algorithm_name):
         """
@@ -56,86 +50,6 @@ class HashHandler:
         
     def log_parameters(self):
         raise NotImplementedError("Subclasses must implement this method.")
-
-    def crack_chunk_wrapper(self, shm_name, batch_size, max_pwd_size, found_flag):
-        """
-        Worker function that processes a password batch from shared memory.
-
-        Args:
-            shm_name (str): Name of the shared memory segment.
-            batch_size (int): Number of passwords in the batch.
-            max_pwd_size (int): Maximum password size in bytes.
-            found_flag (dict): Shared dictionary for tracking matches.
-
-        Returns:
-            tuple: (list of matched passwords, number of passwords processed)
-        """
-        shm = None
-        try:
-            # Attach to shared memory
-            shm = shared_memory.SharedMemory(name=shm_name)
-            shared_array = np.ndarray((batch_size, max_pwd_size), dtype=np.uint8, buffer=shm.buf)
-
-            # Synchronize access to shared memory with semaphore
-            HashHandler.SEMAPHORE.acquire()
-            try:
-                passwords = [
-                    bytes(shared_array[i]).decode('utf-8').rstrip('\x00') 
-                    for i in range(batch_size) 
-                    if shared_array[i, 0] != 0  # Ignore empty rows
-                ]
-            finally:
-                HashHandler.SEMAPHORE.release()
-            
-            print(f"Worker {os.getpid()} processing passwords: {passwords[:5]}...")
-
-            # Perform password cracking
-            results, chunk_count = self.crack_chunk(passwords, found_flag)
-
-            return results, chunk_count
-
-        except Exception as e:
-            print(f"Error in crack_chunk_wrapper: {e}")
-            return [], 0
-
-        finally:
-            if shm:
-                shm.close()
-
-
-    def crack_chunk(self, passwords, found_flag):
-        """
-        Main cracking logic that processes a batch of passwords.
-
-        Args:
-            passwords (list): List of passwords to check.
-            found_flag (dict): Shared dictionary for tracking matches.
-
-        Returns:
-            tuple: (list of matched passwords, number of passwords processed)
-        """
-        print(f"Processing passwords in chunk: {passwords[:10]}")  # Debug first 10 passwords
-        chunk_count = 0
-        results = []
-
-        # Early exit if all hashes are already cracked
-        if found_flag["found"] >= found_flag["goal"]:
-            return results, chunk_count
-
-        # Process each password in the batch
-        for password in passwords:
-            # Exit early if goal is reached
-            if found_flag["found"] >= found_flag["goal"]:
-                return results, chunk_count
-
-            chunk_count += 1
-
-            # Verify password and collect results if matched
-            matched_passwords = self.verify(password)
-            if matched_passwords:
-                results.append(matched_passwords)
-
-        return results, chunk_count
 
 
 class Argon2Handler(HashHandler):
@@ -437,110 +351,6 @@ class PBKDF2Handler(HashHandler):
                 continue  # Continue to the next entry
 
         return None  # No matches found
-    
-
-# class PBKDF2Handler(HashHandler):
-#     def __init__(self, hash_digest_with_metadata):
-#         self.hash_digest_with_metadata = hash_digest_with_metadata
-#         self.parameters = self.parse_hash_digest_with_metadata()
-
-#     def parse_hash_digest_with_metadata(self):
-#         """
-#         Parses the PBKDF2 metadata from hash_digest_with_metadata and decodes
-#         salt and target hashes for each item in the list.
-#         """
-#         self.target_hash_to_crack = []  # Reset target hashes
-
-#         for hash_digest in self.hash_digest_with_metadata:
-#             # Split the hash digest into components
-#             parts = hash_digest.split("$")
-#             if len(parts) != 5 or parts[1] != "pbkdf2":
-#                 raise ValueError(f"Invalid PBKDF2 hash format: {hash_digest}")
-
-#             try:
-#                 # Parse parameters into a dictionary
-#                 param_string = parts[2]
-#                 param_dict = dict(param.split("=") for param in param_string.split(","))
-
-#                 # Decode salt and hash
-#                 salt_b64 = parts[3]
-#                 hash_hex = parts[4]
-
-#                 salt = base64.urlsafe_b64decode(salt_b64)
-#                 target_hash = bytes.fromhex(hash_hex)
-
-#                 # Calculate lengths
-#                 hash_length = len(target_hash)
-#                 salt_length = len(salt)
-
-#                 # Determine algorithm based on hash length if "a" is not provided
-#                 algorithm = param_dict.get("a", None)
-#                 if not algorithm:
-#                     if hash_length == 32:
-#                         algorithm = "sha256"
-#                     elif hash_length == 64:
-#                         algorithm = "sha512"
-#                     else:
-#                         raise ValueError(f"Unknown algorithm for hash length: {hash_length}")
-
-#                 # Extract iterations
-#                 iterations = int(param_dict.get("i", 0))  # Iterations count
-#                 if not iterations > 0:
-#                     raise ValueError("PBKDF2 iterations must be a positive integer")
-
-#                 # Store parameters and decoded hashes
-#                 self.target_hash_to_crack.append({
-#                     "full_hash": hash_digest,
-#                     "algorithm": algorithm,
-#                     "iterations": iterations,
-#                     "hash_length": hash_length,
-#                     "salt": salt,
-#                     "target_hash": target_hash,
-#                 })
-#             except (ValueError, KeyError) as e:
-#                 raise ValueError(f"Error parsing PBKDF2 parameters: {hash_digest} - {e}")
-
-#         # Return the parsed parameters for logging or further use
-#         return algorithm, iterations, hash_length, salt_length
-
-#     def log_parameters(self):
-#         """Return a formatted log message for parameters."""
-#         algorithm, length, salt_length, iterations = self.parameters
-#         return (
-#             f"algorithm={algorithm}, hash length={length}, "
-#             f"salt length={salt_length}, iterations={iterations}"
-#         )
-
-#     def verify(self, potential_password_match):
-#         """
-#         Verifies a potential password against a list of stored PBKDF2 hashes.
-#         """
-#         for entry in self.target_hash_to_crack:
-#             algorithm_name = entry["algorithm"]
-#             hash_length = entry["hash_length"]
-#             iterations = entry["iterations"]
-#             salt = entry["salt"]
-#             target_hash = entry["target_hash"]
-
-#             algorithm = self.parse_algorithm(algorithm_name)
-
-#             # Create a new PBKDF2HMAC instance dynamically
-#             self.hash_processor = PBKDF2HMAC(
-#                 algorithm=algorithm,
-#                 length=hash_length,
-#                 salt=salt,
-#                 iterations=iterations
-#             )
-
-#             try:
-#                 if self.hash_processor.derive(potential_password_match) == target_hash:
-#                     return potential_password_match.decode()  # Match found
-            
-#             except InvalidKey:
-#                 print(f"Password did not match for target hash: {target_hash}")
-#                 continue
-
-#         return None  # No matches found
 
 
 class BcryptHandler(HashHandler):
@@ -584,6 +394,8 @@ class BcryptHandler(HashHandler):
         """
         Verifies a potential password against the stored bcrypt hashes.
         """
+        self.parse_hash_digest_with_metadata()
+
         try:
             for entry in self.parameters:
                 target_hash = entry["full_hash"]
@@ -822,28 +634,3 @@ HashHandler.NTLMHandler = NTLMHandler
 HashHandler.MD5Handler = MD5Handler
 HashHandler.SHA256Handler = SHA256Handler
 HashHandler.SHA512Handler = SHA512Handler
-
-
-# def get_hash_handler(hash_type, hash_digest_with_metadata):
-#     hash_handlers = {
-#         "argon": lambda x: Argon2Handler(x),
-#         "scrypt": lambda x: ScryptHandler(x),
-#         "pbkdf2": lambda x: PBKDF2Handler(x),
-#         "bcrypt": lambda x: BcryptHandler(x),
-#         "ntlm": lambda x: NTLMHandler(x),
-#         "md5": lambda x: MD5Handler(x),
-#         "sha256": lambda x: SHA256Handler(x), 
-#         "sha512": lambda x: SHA512Handler(x)
-#     }
-#     try:
-#         handler = hash_handlers.get(hash_type)
-        
-#         if not handler:
-#             raise ValueError(f"No handler found for hash type: {hash_type}")
-
-#         return handler(hash_digest_with_metadata)
-   
-#     except ValueError as e:
-#         raise ValueError(f"Error determining hash type or handler: {e}")
-    
-

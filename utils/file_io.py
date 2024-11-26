@@ -30,7 +30,7 @@ def yield_dictionary_batches(path_to_passwords, batch_size):
         with path_to_passwords.open("r", encoding="latin-1", errors="replace") as file:
             batch = []
             for line_number, line in enumerate(file, start=1):
-                password = line.strip().encode("latin-1", errors="replace")  # Handle encoding issues gracefully
+                password = line.strip()
                 batch.append(password)
                 total_passwords += 1
 
@@ -54,5 +54,5 @@ def yield_dictionary_batches(path_to_passwords, batch_size):
 
 
 def get_number_of_passwords(path_to_passwords):
-    with path_to_passwords.open("r", encoding="latin-1") as file:
+    with path_to_passwords.open("r", encoding="latin-1", errors="replace") as file:
         return sum(1 for _ in file)

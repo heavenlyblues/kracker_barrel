@@ -1,4 +1,4 @@
-from core.kracker import Kracker
+from core.krack_up import Kracker
 from utils.cli import load_args, load_config
 import cProfile
 
@@ -22,4 +22,4 @@ if __name__ == "__main__":
 
     # Stop profiling and save results to a file
     profiler.disable()
-    profiler.dump_stats('profile_results_1123a.prof')
+    profiler.dump_stats('profile_results_1126.prof')

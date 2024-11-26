@@ -9,7 +9,7 @@
 # Standard Dictionary Operation ##
 operation: dict
 target_file: bcrypt_test.txt
-password_list: rockyou_med.txt
+password_list: rockyou_teensy.txt
 
 
 # Standard Mask-based Operation ##

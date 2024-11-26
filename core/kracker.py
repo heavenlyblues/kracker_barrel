@@ -1,8 +1,8 @@
 import atexit
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Manager, shared_memory
+from multiprocessing import Manager, shared_memory, Lock
 import numpy as np
-import os, platform, time
+import os, time
 from pathlib import Path
 from tqdm import tqdm
 from core.hash_handler import HashHandler
@@ -20,18 +20,19 @@ class Kracker:
         self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
         self.hash_type = self.detect_hash_type() # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
-        
+        self.batch_size = 2000  # Adjust batch size for performance
+
         self.mask_pattern = args.pattern # Mask-based attack
         self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
         self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
 
+        # self.lock = Lock()
         self.manager = Manager()
         self.start_time = time.time()
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
         
         self.max_password_size = 128  # Maximum password length in bytes
-        self.batch_size = 2000  # Adjust batch size for performance
         self.batch_generator = None
 
         # Calculate shared memory size (batch size * max password length in bytes)
@@ -170,21 +171,16 @@ class Kracker:
     #     global WORKER_ID
     #     WORKER_ID = worker_id  # Store worker ID in global variable
 
-    def write_to_shared_memory(self, batch):
-        print(f"Writing batch of size {len(batch)} to shared memory")
-        for i, password in enumerate(batch):
-            # Convert password to bytes and store it in the shared array    
-            # print(f"Worker {worker_id} processing password index {i}: {password}")
-            self.shared_array[i, :len(password)] = np.frombuffer(password, dtype=np.uint8)
-            self.shared_array[i, len(password):] = 0  # Zero out the remaining space
 
-        # Clear any unused rows in the shared memory
+    def write_to_shared_memory(self, batch):
+        """Write a batch of passwords to shared memory."""
+        for i, password in enumerate(batch):
+            self.shared_array[i, :len(password)] = np.frombuffer(password, dtype=np.uint8)
+            self.shared_array[i, len(password):] = 0  # Zero out remaining space
+        # Clear unused rows
         for i in range(len(batch), self.batch_size):
             self.shared_array[i, :] = 0
-
-        # Debug the written data
-        print(f"Shared memory contents after writing batch:")
-        print(self.shared_array[:len(batch)])
+    
 
     def run(self):
         """Main loop to process password batches and handle matches."""
@@ -215,14 +211,8 @@ class Kracker:
                             print(f"Preloading batch: {batch[:5]}...")  # Debug log
                             # Write batch to shared memory
                             self.write_to_shared_memory(batch)
-                            
 
-                            future = executor.submit(
-                                self.hash_handler.crack_chunk_wrapper,
-                                self.shared_mem.name, 
-                                self.batch_size, self.max_password_size, 
-                                self.found_flag
-                            )
+                            future = executor.submit(self.crack_chunk_wrapper)
                             futures.append(future)
                         except StopIteration:  # Once batches are consumed, generator raises a StopIteration exception
                             break  # No more batches to preload
@@ -248,12 +238,7 @@ class Kracker:
                                         print(f"Submitting batch: {len(batch)} passwords")
                                         self.write_to_shared_memory(batch)
 
-                                        new_future = executor.submit(
-                                            self.hash_handler.crack_chunk_wrapper,
-                                            self.shared_mem.name, self.batch_size, 
-                                            self.max_password_size, 
-                                            self.found_flag
-                                        )
+                                        new_future = executor.submit(self.crack_chunk_wrapper)
                                         futures.append(new_future)
                                     except StopIteration: # Generator raises a StopIteration exception
                                         pass  # No more batches to load
@@ -273,6 +258,62 @@ class Kracker:
         finally:
             # Ensure shared memory cleanup
             self.cleanup_shared_memory()
+
+
+    def crack_chunk_wrapper(self):
+        """
+        Worker function that processes a password batch from shared memory.
+        """
+        try:
+            passwords = [
+                bytes(self.shared_array[i]).decode('utf-8').rstrip('\x00') 
+                for i in range(self.batch_size) 
+                if self.shared_array[i, 0] != 0  # Ignore empty rows
+            ]
+            print(f"Worker {os.getpid()} processing passwords: {passwords[:5]}...")
+
+            # Perform password cracking
+            results, chunk_count = self.crack_chunk(passwords)
+
+            return results, chunk_count
+
+        except Exception as e:
+            print(f"Error in crack_chunk_wrapper: {e}")
+            return [], 0
+
+
+    def crack_chunk(self, passwords):
+        """
+        Main cracking logic that processes a batch of passwords.
+
+        Args:
+            passwords (list): List of passwords to check.
+
+        Returns:
+            tuple: (list of matched passwords, number of passwords processed)
+        """
+        print(f"Processing passwords in chunk: {passwords[:10]}")  # Debug first 10 passwords
+        chunk_count = 0
+        results = []
+
+        # Early exit if all hashes are already cracked
+        if self.found_flag["found"] >= self.found_flag["goal"]:
+            return results, chunk_count
+
+        # Process each password in the batch
+        for password in passwords:
+            # Exit early if goal is reached
+            if self.found_flag["found"] >= self.found_flag["goal"]:
+                return results, chunk_count
+
+            chunk_count += 1
+
+            # Verify password and collect results if matched
+            matched_passwords = HashHandler.verify(password)
+            if matched_passwords:
+                results.append(matched_passwords)
+
+        return results, chunk_count
 
 
     # Process the resluts from completed futures
