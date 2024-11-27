@@ -135,10 +135,9 @@ class Argon2Handler(HashHandler):
         for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
             try:
                 # Derive the hash and compare with the target
-                print(target_hash)
-                print(potential_password_match)
-                if processor.verify(target_hash, potential_password_match):
-                    return potential_password_match.decode()  # Match found
+                pwd_encoded = potential_password_match.encode()
+                if processor.verify(target_hash, pwd_encoded):
+                    return potential_password_match  # Match found
             except Exception:
                 # Continue to the next hash if verification fails
                 continue
@@ -503,7 +502,7 @@ class BcryptHandler(HashHandler):
                 target_hash = entry["full_hash"]
                 # Use bcrypt's checkpw function to verify the password
                 if bcrypt.checkpw(potential_password_match.encode("utf-8"), target_hash):
-                    return potential_password_match.decode()  # Return on first match
+                    return potential_password_match  # Return on first match
             return None  # No matches found after checking all hashes
         except bcrypt.error as e:
             print(f"Error during bcrypt verification: {e}")

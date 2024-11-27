@@ -1,5 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager
+from multiprocessing.shared_memory import ShareableList
+from multiprocessing.managers import SharedMemoryManager
 import os, time
 from pathlib import Path
 from tqdm import tqdm
@@ -8,6 +10,7 @@ from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_br
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
 from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
+import pdb
 
 
 
@@ -22,6 +25,7 @@ class Kracker:
         self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
         self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
         self.workers = os.cpu_count()
+        self.preload_limit = self.workers * 3
         self.batch_size = 2000  # Adjust batch size for performance
         
         self.hash_handler = self.initialize_hash_handler()
@@ -75,9 +79,14 @@ class Kracker:
 class BatchManager:
     def __init__(self, kracker):
         self.kracker = kracker
-        self.batch_generator = self.initialize_batch_generator()
-        self.total_batches = None
-        self.total_passwords = None
+        # self.initialize_batch_generator()
+        self.batch_generator = None
+        self.total_batches = 0
+        self.total_passwords = 0
+        self.maximum_batches = (self.total_passwords // self.kracker.batch_size) + 1
+        self.smm = SharedMemoryManager()
+        self.smm.start()
+        # self.sl = self.smm.ShareableList(size=self.batch_size * self.max_password_length)
 
     def initialize_batch_generator(self):
         if self.kracker.operation == "dict":
@@ -86,7 +95,7 @@ class BatchManager:
 
         elif self.kracker.operation == "brut":
             generator = generate_brute_candidates(self.kracker.brute_settings)
-            self.batch_generator = yield_brute_batches(generator, self.bkracker.atch_size)
+            self.batch_generator = yield_brute_batches(generator, self.kracker.batch_size)
 
         elif self.kracker.operation == "mask":
             generator = generate_mask_candidates(self.mask_pattern, self.kracker.custom_strings)
@@ -97,72 +106,112 @@ class BatchManager:
         
         self.total_batches = -(-self.total_passwords // self.kracker.batch_size)
 
+    def preload_batches(self, limit):
+        """Preload a specified number of batches into a single ShareableList."""
+        shared_batches = []
+        max_password_length = 0
+
+        for _ in range(limit):
+            try:
+                breakpoint()
+                batch = next(self.batch_generator)
+                breakpoint()
+                max_password_length = max(max_password_length, *(len(password) for password in batch))
+                serialized_batch = "\n".join(batch)
+                shared_batches.append(serialized_batch)
+            except StopIteration:
+                print("No more batches to preload.")
+                break
+
+        self.shared_batches = self.smm.ShareableList(shared_batches)
+        self.max_password_length = max_password_length
+        print(f"Preloaded {len(self.shared_batches)} batches.")
+
+    def get_batch(self, index):
+        """Retrieve and deserialize a batch from the ShareableList."""
+        try:
+            serialized_batch = self.shared_batches[index]
+            return serialized_batch.split("\n")  # Deserialize
+        except IndexError:
+            print(f"No batch found at index {index}.")
+            return None
+
+    def cleanup(self):
+        """Release shared memory."""
+        self.smm.shutdown()
+
 
 class Workers:
-    def __init__(self, kracker, batch_manager, reporter):
+    def __init__(self, kracker, batch_man, reporter):
         self.kracker = kracker
-        self.batch_manager = batch_manager
+        self.batch_man = batch_man
         self.reporter = reporter  # Reporter instance for logging
-
 
     def run(self):
         """Main loop to process password batches and handle matches."""
         print(self)  # Calls the __str__ method to print the configuration
+        self.batch_man.initialize_batch_generator()
 
         try:
-            with ProcessPoolExecutor(max_workers=6) as executor:
-                self.batch_manager.initialize_batch_generator()
+            with ProcessPoolExecutor(max_workers=self.kracker.workers) as executor:
+                breakpoint()
+                self.batch_man.preload_batches(self.kracker.preload_limit)
+                total_batches = len(self.batch_man.shared_batches)  # Get total batches from the ShareableList
+                
+                print(f"Preloading batch {len(self.batch_man.shared_batches) + 1}")      
 
                 futures = []  # Queue to hold active Future objects
-                preload_limit = self.kracker.workers * 2
+                current_batch_index = 0  # Start with the first batch
+
                 print(f"{LIGHT_YELLOW}Starting batch preloading...{RESET}", end=" ")
                 print(f"{DIM}Done!{RESET}")
 
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
-                          total=self.batch_manager.total_batches, mininterval=0.1, smoothing=0.1, 
+                          total=self.batch_man.total_batches, mininterval=0.1, smoothing=0.1, 
                           ncols=100, leave=True, ascii=True) as progress_bar:
 
-                    #  Submit batches to crack chunk and collect results in futures
-                    for _ in range(preload_limit):
-                        try:
-                            chunk = next(self.batch_manager.batch_generator)
-                            future = executor.submit(crack_chunk_wrapper, self.kracker.hash_type, 
-                                                     self.kracker.hash_digest_with_metadata, chunk, 
-                                                     self.kracker.found_flag)
+                    # Main processing loop
+                    while futures or current_batch_index < total_batches:
+                        # Submit new batches to futures if space is available
+                        while len(futures) < self.kracker.preload_limit and current_batch_index < total_batches:
+                            # Retrieve and deserialize the current batch
+                            batch = self.batch_man.get_batch(current_batch_index)
+                            if batch is None:
+                                break
+                            breakpoint()
+                            future = executor.submit(
+                                crack_chunk_wrapper,
+                                self.kracker.hash_type,
+                                self.kracker.hash_digest_with_metadata,
+                                batch,  # Pass the deserialized batch
+                                self.kracker.found_flag,
+                            )
                             futures.append(future)
-                        except StopIteration:  # Once batches are consumed, generator raises a StopIteration exception
-                            break  # No more batches to preload
+                            current_batch_index += 1  # Move to the next batch
 
-                    # Process futures dynamically as they complete
-                    while futures:
+                        # Process completed futures
                         for future in as_completed(futures):
                             try:
                                 self.process_task_result(future)
+                                progress_bar.update(1)  # Update the progress bar
 
-                                progress_bar.update(1) # Update the progress bar
-
-                                # Stop if all the target hashes are matched 
+                                # Stop if all target hashes are matched
                                 if self.kracker.found_flag["found"] == self.kracker.found_flag["goal"]:
-                                    progress_bar.close()  # Ensure progress bar closes cleanly
+                                    progress_bar.close()
                                     self.reporter.final_summary()
                                     return  # Exit immediately
-
-                                # Dynamically preload new batches as space frees up
-                                if len(futures) < preload_limit:
-                                    try:
-                                        chunk = next(self.batch_manager.batch_generator)
-                                        new_future = executor.submit(crack_chunk_wrapper, self.kracker.hash_type, 
-                                                                     self.kracker.hash_digest_with_metadata, chunk, 
-                                                                     self.kracker.found_flag)
-                                        futures.append(new_future)
-                                    except StopIteration: # Generator raises a StopIteration exception
-                                        pass  # No more batches to load
                             except Exception as e:
                                 print(f"Error processing future: {e}")
                             finally:
                                 futures.remove(future)
-                    progress_bar.close()  # Ensure progress bar closes cleanly
+
+                        # Preload more batches dynamically if needed
+                        if current_batch_index == total_batches and len(futures) < self.kracker.preload_limit:
+                            self.batch_man.preload_batches(1)
+                            total_batches = len(self.batch_man.shared_batches)  # Update total_batches if more are added
+
+                progress_bar.close()
             self.reporter.final_summary()
 
         except KeyboardInterrupt:
@@ -170,6 +219,9 @@ class Workers:
             self.reporter.summary_log["message"] = "Process interrupted. Partial summary_log displayed."
             self.reporter.summary_log["elapsed_time"] = time.time() - self.kracker.start_time
             display_summary(self.kracker.found_flag, self.reporter.summary_log)
+
+        finally:
+            self.batch_man.cleanup()
 
 
     # Process the resluts from completed futures
@@ -242,7 +294,10 @@ class Reporter:
     def final_summary(self):
         """Display final summary after processing is completed."""
         # Retrieve hash parameters
-        self.summary_log["hash_parameters"] = self.kracker.hash_handler.log_parameters()
+        try:
+            self.summary_log["hash_parameters"] = self.kracker.hash_handler.log_parameters()
+        except AttributeError:
+            self.summary_log["hash_parameters"] = "N/A"  # Default if no parameters are available
 
         # Construct the final message based on results
         if self.kracker.found_flag["found"] == 0:

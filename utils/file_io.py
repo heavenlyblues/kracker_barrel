@@ -29,7 +29,7 @@ def yield_dictionary_batches(path_to_passwords, batch_size):
         with path_to_passwords.open("r", encoding="latin-1") as file:
             batch = []
             for line in file:
-                batch.append(line.strip().encode())
+                batch.append(line.strip())
                 if len(batch) >= batch_size:
                     yield batch  # Yield a full batch of passwords
                     batch = []  # Reset batch for the next set of lines
