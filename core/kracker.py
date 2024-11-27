@@ -10,7 +10,7 @@ from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_br
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
 from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
-import pdb
+# import pdb
 
 
 
@@ -79,14 +79,12 @@ class Kracker:
 class BatchManager:
     def __init__(self, kracker):
         self.kracker = kracker
-        # self.initialize_batch_generator()
         self.batch_generator = None
-        self.total_batches = 0
         self.total_passwords = 0
-        self.maximum_batches = (self.total_passwords // self.kracker.batch_size) + 1
         self.smm = SharedMemoryManager()
         self.smm.start()
-        # self.sl = self.smm.ShareableList(size=self.batch_size * self.max_password_length)
+        self.max_batches = 0
+        self.rem_batches = 0
 
     def initialize_batch_generator(self):
         if self.kracker.operation == "dict":
@@ -103,8 +101,9 @@ class BatchManager:
 
         elif self.kracker.operation == "rule":
             pass
-        
-        self.total_batches = -(-self.total_passwords // self.kracker.batch_size)
+
+        self.max_batches = -(-self.total_passwords // self.kracker.batch_size)
+        self.rem_batches = self.max_batches
 
     def preload_batches(self, limit):
         """Preload a specified number of batches into a single ShareableList."""
@@ -113,9 +112,7 @@ class BatchManager:
 
         for _ in range(limit):
             try:
-                breakpoint()
                 batch = next(self.batch_generator)
-                breakpoint()
                 max_password_length = max(max_password_length, *(len(password) for password in batch))
                 serialized_batch = "\n".join(batch)
                 shared_batches.append(serialized_batch)
@@ -125,6 +122,7 @@ class BatchManager:
 
         self.shared_batches = self.smm.ShareableList(shared_batches)
         self.max_password_length = max_password_length
+        self.rem_batches -= len(shared_batches)  # Update remaining batches
         print(f"Preloaded {len(self.shared_batches)} batches.")
 
     def get_batch(self, index):
@@ -154,12 +152,9 @@ class Workers:
 
         try:
             with ProcessPoolExecutor(max_workers=self.kracker.workers) as executor:
-                breakpoint()
                 self.batch_man.preload_batches(self.kracker.preload_limit)
-                total_batches = len(self.batch_man.shared_batches)  # Get total batches from the ShareableList
+                current_batches = len(self.batch_man.shared_batches)  # Get total batches from the ShareableList
                 
-                print(f"Preloading batch {len(self.batch_man.shared_batches) + 1}")      
-
                 futures = []  # Queue to hold active Future objects
                 current_batch_index = 0  # Start with the first batch
 
@@ -168,27 +163,33 @@ class Workers:
 
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
-                          total=self.batch_man.total_batches, mininterval=0.1, smoothing=0.1, 
+                          total=self.batch_man.max_batches, mininterval=0.1, smoothing=0.1, 
                           ncols=100, leave=True, ascii=True) as progress_bar:
 
                     # Main processing loop
-                    while futures or current_batch_index < total_batches:
-                        # Submit new batches to futures if space is available
-                        while len(futures) < self.kracker.preload_limit and current_batch_index < total_batches:
-                            # Retrieve and deserialize the current batch
+                    while futures or current_batch_index < current_batches or self.batch_man.rem_batches > 0:
+                        # print(
+                        #     f"Loop Start: current_batch_index={current_batch_index}, "
+                        #     f"current_batches={current_batches}, "
+                        #     f"rem_batches={self.batch_man.rem_batches}, "
+                        #     f"len(futures)={len(futures)}"
+                        # )
+                        
+                        while len(futures) < self.kracker.preload_limit and current_batch_index < current_batches:
+                            print(f"Submitting batch {current_batch_index}")
                             batch = self.batch_man.get_batch(current_batch_index)
+                            # print(f"Batch {current_batch_index}: {batch}")
                             if batch is None:
                                 break
-                            breakpoint()
                             future = executor.submit(
                                 crack_chunk_wrapper,
                                 self.kracker.hash_type,
                                 self.kracker.hash_digest_with_metadata,
-                                batch,  # Pass the deserialized batch
+                                batch,
                                 self.kracker.found_flag,
                             )
                             futures.append(future)
-                            current_batch_index += 1  # Move to the next batch
+                            current_batch_index += 1
 
                         # Process completed futures
                         for future in as_completed(futures):
@@ -205,11 +206,14 @@ class Workers:
                                 print(f"Error processing future: {e}")
                             finally:
                                 futures.remove(future)
-
-                        # Preload more batches dynamically if needed
-                        if current_batch_index == total_batches and len(futures) < self.kracker.preload_limit:
-                            self.batch_man.preload_batches(1)
-                            total_batches = len(self.batch_man.shared_batches)  # Update total_batches if more are added
+                        
+                        # Dynamically preload more batches if needed
+                        if current_batch_index == current_batches and self.batch_man.rem_batches > 0:
+                            self.batch_man.preload_batches(
+                                min(self.kracker.preload_limit, self.batch_man.rem_batches)
+                            )
+                            current_batches = len(self.batch_man.shared_batches)
+                            current_batch_index = 0  # Reset for the newly preloaded batches
 
                 progress_bar.close()
             self.reporter.final_summary()
