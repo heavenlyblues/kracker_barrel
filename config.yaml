@@ -8,8 +8,8 @@
 
 # Standard Dictionary Operation ##
 operation: dict
-target_file: bcrypt_test2.txt
-password_list: rockyou_med.txt
+target_file: argon.txt
+password_list: dictionary_eng.txt
 
 
 # Standard Mask-based Operation ##

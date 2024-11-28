@@ -10,13 +10,23 @@ LIGHT_YELLOW, BLINK, DIM, RESET = "\033[93m", "\033[5m", "\033[2m", "\033[0m"
 # Set up logging
 log_dir = Path("logs")
 log_dir.mkdir(parents=True, exist_ok=True)  # Ensure logs directory exists
-log_file = log_dir / f"log_{datetime.now().strftime('%Y%m%d')}.txt"
+log_file = log_dir / f"log_{datetime.now().strftime('%Y%m%d')}.log"
 
 logging.basicConfig(
     filename=log_file,
     level=logging.INFO,  # Change to DEBUG for more detailed logs
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+# Additional logger for problematic lines
+problematic_log_file = log_dir / f"problematic_lines_{datetime.now().strftime('%Y%m%d')}.log"
+problematic_logger = logging.getLogger("problematic_lines")
+problematic_logger.setLevel(logging.WARNING)
+
+file_handler = logging.FileHandler(problematic_log_file)
+file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
+problematic_logger.addHandler(file_handler)
 
 # Function to create blinking text
 def blinking_text(message, duration=3):

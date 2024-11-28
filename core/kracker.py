@@ -5,13 +5,12 @@ from multiprocessing.managers import SharedMemoryManager
 import os, time
 from pathlib import Path
 from tqdm import tqdm
-from core.hash_handler import HashHandler, crack_chunk_wrapper
+from core.hash_handler import HashHandler, crack_chunk
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
-from utils.file_io import get_number_of_passwords, yield_dictionary_batches, load_target_hash
-from utils.reporter import display_summary, blinking_text, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
+from utils.file_io import get_number_of_passwords, yield_dictionary_batches, validate_password_file, load_target_hash
+from utils.reporter import display_summary, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
 # import pdb
-
 
 
 class Kracker:
@@ -24,9 +23,9 @@ class Kracker:
         self.mask_pattern = args.pattern # Mask-based attack
         self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
         self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
-        self.workers = os.cpu_count()
+        self.workers = os.cpu_count() - 1
         self.preload_limit = self.workers * 3
-        self.batch_size = 2000  # Adjust batch size for performance
+        self.batch_size = 5000  # Adjust batch size for performance
         
         self.hash_handler = self.initialize_hash_handler()
         
@@ -55,7 +54,8 @@ class Kracker:
             return hash_map[type_check]
         except KeyError:
             raise ValueError(f"Unknown hash format: {type_check}")
-        
+
+
     def initialize_hash_handler(self):
         handlers = {
             "argon": HashHandler.Argon2Handler,
@@ -86,8 +86,12 @@ class BatchManager:
         self.max_batches = 0
         self.rem_batches = 0
 
+
     def initialize_batch_generator(self):
         if self.kracker.operation == "dict":
+            invalid_lines = validate_password_file(self.kracker.path_to_passwords)
+            if invalid_lines:
+                print(f"Invalid lines detected: {invalid_lines}")
             self.batch_generator = yield_dictionary_batches(self.kracker.path_to_passwords, self.kracker.batch_size)
             self.total_passwords = get_number_of_passwords(self.kracker.path_to_passwords)
 
@@ -105,8 +109,11 @@ class BatchManager:
         self.max_batches = -(-self.total_passwords // self.kracker.batch_size)
         self.rem_batches = self.max_batches
 
+
     def preload_batches(self, limit):
-        """Preload a specified number of batches into a single ShareableList."""
+        """ Preload a specified number of batches into a single ShareableList.
+            Called by ProcessPoolExecutor
+        """
         shared_batches = []
         max_password_length = 0
 
@@ -114,8 +121,8 @@ class BatchManager:
             try:
                 batch = next(self.batch_generator)
                 max_password_length = max(max_password_length, *(len(password) for password in batch))
-                serialized_batch = "\n".join(batch)
-                shared_batches.append(serialized_batch)
+                shared_batch = self.smm.ShareableList(batch)  # Store each batch directly
+                shared_batches.append(shared_batch.shm.name)  # Store shared memory names
             except StopIteration:
                 print("No more batches to preload.")
                 break
@@ -123,16 +130,19 @@ class BatchManager:
         self.shared_batches = self.smm.ShareableList(shared_batches)
         self.max_password_length = max_password_length
         self.rem_batches -= len(shared_batches)  # Update remaining batches
-        print(f"Preloaded {len(self.shared_batches)} batches.")
+        # print(f"Preloaded {len(self.shared_batches)} batches.")
+
 
     def get_batch(self, index):
         """Retrieve and deserialize a batch from the ShareableList."""
         try:
-            serialized_batch = self.shared_batches[index]
-            return serialized_batch.split("\n")  # Deserialize
+            shared_name = self.shared_batches[index]
+            shared_batch = ShareableList(name=shared_name)  # Access shared memory
+            return list(shared_batch)  # Convert back to a Python list
         except IndexError:
             print(f"No batch found at index {index}.")
             return None
+
 
     def cleanup(self):
         """Release shared memory."""
@@ -145,9 +155,10 @@ class Workers:
         self.batch_man = batch_man
         self.reporter = reporter  # Reporter instance for logging
 
+
     def run(self):
         """Main loop to process password batches and handle matches."""
-        print(self)  # Calls the __str__ method to print the configuration
+        print(self.reporter)  # Calls the __str__ method to print the configuration
         self.batch_man.initialize_batch_generator()
 
         try:
@@ -163,29 +174,24 @@ class Workers:
 
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
-                          total=self.batch_man.max_batches, mininterval=0.1, smoothing=0.1, 
+                          total=self.batch_man.max_batches, 
+                          mininterval=0.1, smoothing=0.1, 
                           ncols=100, leave=True, ascii=True) as progress_bar:
 
                     # Main processing loop
                     while futures or current_batch_index < current_batches or self.batch_man.rem_batches > 0:
-                        # print(
-                        #     f"Loop Start: current_batch_index={current_batch_index}, "
-                        #     f"current_batches={current_batches}, "
-                        #     f"rem_batches={self.batch_man.rem_batches}, "
-                        #     f"len(futures)={len(futures)}"
-                        # )
-                        
+
                         while len(futures) < self.kracker.preload_limit and current_batch_index < current_batches:
-                            print(f"Submitting batch {current_batch_index}")
+                            # print(f"Submitting batch {current_batch_index}")
                             batch = self.batch_man.get_batch(current_batch_index)
                             # print(f"Batch {current_batch_index}: {batch}")
                             if batch is None:
                                 break
                             future = executor.submit(
-                                crack_chunk_wrapper,
+                                crack_chunk,
                                 self.kracker.hash_type,
                                 self.kracker.hash_digest_with_metadata,
-                                batch,
+                                batch, 
                                 self.kracker.found_flag,
                             )
                             futures.append(future)
@@ -265,7 +271,10 @@ class Reporter:
             f"  Hash type: {self.kracker.hash_type}\n"
             f"  Password list: {self.kracker.path_to_passwords}\n"
             f"  Batch size: {self.kracker.batch_size}\n"
+            f"  Logical cores: {os.cpu_count()}\n"
             f"  Workers: {self.summary_log["workers"]}\n"
+            f"  Process PID: {os.getpid()}\n"
+            f"  Preload limit: {self.kracker.preload_limit}\n"
         )
 
 
@@ -285,6 +294,7 @@ class Reporter:
             "operation": self.kracker.operation,
             "input_file": self.kracker.target_file,
             "hash_type": self.kracker.hash_type,
+            "hash_parameters": None,
             "file_scanned": self.kracker.path_to_passwords,
             "workers": self.kracker.workers,
             "batches": total_batches,

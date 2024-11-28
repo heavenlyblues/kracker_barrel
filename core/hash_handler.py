@@ -1,4 +1,5 @@
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from argon2 import PasswordHasher
 import bcrypt
 from Crypto.Hash import MD4
@@ -8,10 +9,13 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 import hashlib
 import logging
+import os
 
 
 class HashHandler:
     # Define a mapping of algorithm names to their respective hash objects
+    CORES = os.cpu_count()
+    MAX_THREADS = CORES * 3
     ALGORITHM_MAP = {
         "sha512": hashes.SHA512,
         "sha256": hashes.SHA256,
@@ -19,10 +23,64 @@ class HashHandler:
         # Add more algorithms as needed
     }
 
+
     def __init__(self, hash_digest_with_metadata):
-        self.hash_digest_with_metadata = hash_digest_with_metadata
-        self.target_hash_to_crack = []
-        self.parameters = []
+        self.hash_digest_with_metadata = hash_digest_with_metadata  # Input-specific data
+        self.target_hash_to_crack = []  # To be populated as needed
+        self.parameters = []  # To be derived in subclasses
+
+
+    @staticmethod
+    def hex_to_bytes(hash_string):
+        """Convert a hexadecimal hash string to bytes."""
+        try:
+            return bytes.fromhex(hash_string)
+        except ValueError:
+            raise ValueError("Invalid hash format (not hexadecimal)")
+
+
+    @staticmethod
+    def format_standard_log(encoding, format_length):
+        log_message = (
+            f"encoding={encoding}, hash format={format * 4} bits "
+            f"({int(format / 2)} bytes), {format}-character hexadecimal string"
+        )
+        return log_message
+
+
+    def process_chunk(self, chunk, hash_function):
+        """
+        Generic method to process a chunk of passwords and match against target hashes.
+        """
+        def check_password(password):
+            try:
+                computed_hash = hash_function(password)
+                if computed_hash in self.target_hash_to_crack:
+                    return password.decode()  # Return the matched password
+                return None  # Return None if no match found
+            except Exception as e:
+                print(f"Error during hash verification: {e}")
+                return None
+
+        # Use the utility method for threading
+        return self.process_with_threads(chunk, check_password)
+
+
+    def process_with_threads(self, chunk, hash_function, max_threads=MAX_THREADS):
+        """
+        Generic method to process items using a ThreadPoolExecutor.
+        
+        - `items`: List of items to process (e.g., passwords or hashes).
+        - `task_function`: Function to apply to each item.
+        - `max_threads`: Maximum number of threads to use (default is MAX_THREADS).
+        
+        Returns a list of results from `task_function`.
+        """
+        threads = min(max_threads, len(chunk))
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            results = executor.map(hash_function, chunk)
+        return list(filter(None, results))
+
 
     def parse_algorithm(self, algorithm_name):
         """
@@ -34,30 +92,28 @@ class HashHandler:
             raise ValueError(f"Unsupported algorithm: {algorithm_name}")
         return algorithm_class()
 
+
     def parse_hash_digest_with_metadata(self):
+        """Abstract method to parse metadata."""
         raise NotImplementedError("Subclasses must implement this method.")
 
+
     def verify(self, potential_password_match):
+        """Abstract method to verify passwords."""
         raise NotImplementedError("Subclasses must implement this method.")
-    
-    def hex_to_bytes(self, hash_string):
-        """
-        Utility method to convert a hexadecimal hash string to bytes.
-        """
-        try:
-            return bytes.fromhex(hash_string)
-        except ValueError:
-            raise ValueError("Invalid hash format (not hexadecimal)")
         
+
     def log_parameters(self):
+        """Abstract method for logging parameters."""
         raise NotImplementedError("Subclasses must implement this method.")
 
 
 class Argon2Handler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
-        self.hash_digest_with_metadata = set(hash_digest_with_metadata)
-        self.parameters = self.parse_hash_digest_with_metadata()
-        self.precomputed_processors = self.precompute_processors()
+        super().__init__(hash_digest_with_metadata)  # Initialize parent attributes
+        self.parameters = self.parse_hash_digest_with_metadata()  # Argon2-specific parameters
+        self.precomputed_processors = self.precompute_processors()  # Argon2-specific processors
+        self.log_parameters()  # Log initialization parameters
 
 
     def parse_hash_digest_with_metadata(self):
@@ -100,17 +156,16 @@ class Argon2Handler(HashHandler):
 
         return parameters
 
+
     def log_parameters(self):
-        """
-        Return a formatted log message for parameters. Assumes consistent
-        parameters across all hashes.
-        """
         first_entry = self.parameters[0]
-        return (
+        log_message = (
             f"version={first_entry['version']}, memory_cost={first_entry['memory_cost']},"
             f" time_cost={first_entry['time_cost']}, parallelism={first_entry['parallelism']}"
         )
+        return log_message
     
+
     def precompute_processors(self):
         """
         Precomputes reusable PasswordHasher instances for each target hash.
@@ -128,27 +183,31 @@ class Argon2Handler(HashHandler):
 
         return precomputed_processors
     
-    def verify(self, potential_password_match):
+
+    def verify(self, chunk):
         """
         Verifies a potential password against the precomputed processors.
         """
-        for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
-            try:
-                # Derive the hash and compare with the target
-                pwd_encoded = potential_password_match.encode()
-                if processor.verify(target_hash, pwd_encoded):
-                    return potential_password_match  # Match found
-            except Exception:
-                # Continue to the next hash if verification fails
-                continue
-
-        return None  # No matches found
+        def check_password(password):
+            for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
+                try:
+                    if processor.verify(target_hash, password):
+                        return password.decode()  # Match found
+                except Exception:
+                    # Continue to the next hash if verification fails
+                    continue
+            return None  # No matches found
+    
+        return self.process_with_threads(chunk, check_password)
 
 
 class ScryptHandler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -206,52 +265,56 @@ class ScryptHandler(HashHandler):
 
         return parameters
 
+
     def log_parameters(self):
-        """
-        Return a formatted log message for parameters. Assumes consistent parameters
-        across all hashes for simplicity.
-        """
-        # Extract the first parameter set for logging (assumes consistent parameters across hashes)
         first_entry = self.parameters[0]
-        return (
+        log_message = (
             f"hash length={first_entry['hash_length']}, "
             f"salt length={first_entry['salt_length']}, n={first_entry['n']}, "
-            f"r={first_entry['r']}, parallelism={first_entry['p']}"
+            f"block size (r)={first_entry['r']}, parallelism={first_entry['p']}"
         )
+        return log_message
     
-    def verify(self, potential_password_match):
+
+    def verify(self, chunk):
         """
         Verifies a potential password by deriving its Scrypt hash
         and comparing it against each stored hash in target_hash_to_crack.
         """
-        for entry in self.parameters:
-            # Extract parameters for this hash
-            n = entry["n"]
-            r = entry["r"]
-            p = entry["p"]
-            length = entry["length"]
-            salt = entry["salt"]
-            target_hash = entry["target_hash"]
+        def check_password(password):
+            for entry in self.parameters:
+                # Extract parameters for this hash
+                n = entry["n"]
+                r = entry["r"]
+                p = entry["p"]
+                hash_length = entry["hash_length"]
+                salt = entry["salt"]
+                target_hash = entry["target_hash"]
 
-            # Instantiate a new Scrypt KDF
-            scrypt_kdf = Scrypt(salt=salt, length=length, n=n, r=r, p=p)
-            try:
-                # Derive the hash for the potential password
-                computed_hash = scrypt_kdf.derive(potential_password_match)
+                # Instantiate a new Scrypt KDF
+                scrypt_kdf = Scrypt(salt=salt, length=hash_length, n=n, r=r, p=p)
+                try:
+                    # Derive the hash for the potential password
+                    computed_hash = scrypt_kdf.derive(password)
 
-                if computed_hash == target_hash:
-                    return potential_password_match.decode()  # Match found
-            except Exception as e:
-                print(f"Error during verification: {e}")
-                continue  # Move to the next hash in case of an error
+                    if computed_hash == target_hash:
+                        return password.decode()  # Match found
+                except Exception as e:
+                    print(f"Error during verification: {e}")
+                    continue  # Move to the next hash in case of an error
 
-        return None  # No match found
+            return None  # No match found
+        
+        return self.process_with_threads(chunk, check_password)
 
 
 class PBKDF2Handler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -312,154 +375,57 @@ class PBKDF2Handler(HashHandler):
 
         return parameters
 
-    def log_parameters(self):
-        """Return a formatted log message for parameters."""
-        first_entry = self.parameters[0]
-        return (
-            f"{first_entry['algorithm']} - iterations={first_entry['iterations']}, "
-            f"hash_length={first_entry['hash_length']}, salt_length={first_entry['salt_length']}"
-            for entry in self.parameters
-        )
 
-    def verify(self, potential_password_match):
+    def log_parameters(self):
+        first_entry = self.parameters[0]
+        log_message = (
+            f"algorithm={first_entry['algorithm']}, iterations={first_entry['iterations']}, "
+            f"hash length={first_entry['hash_length']}, salt length={first_entry['salt_length']}"
+        )
+        return log_message
+
+
+    def verify(self, chunk):
         """
         Verifies a potential password against a list of stored PBKDF2 hashes.
         """
-        for entry in self.parameters:
-            algorithm_name = entry["algorithm"]
-            hash_length = entry["hash_length"]
-            iterations = entry["iterations"]
-            salt = entry["salt"]
-            target_hash = entry["target_hash"]
+        def check_password(password):
+            for entry in self.parameters:
+                algorithm_name = entry["algorithm"]
+                hash_length = entry["hash_length"]
+                iterations = entry["iterations"]
+                salt = entry["salt"]
+                target_hash = entry["target_hash"]
 
-            algorithm = self.parse_algorithm(algorithm_name)
+                algorithm = self.parse_algorithm(algorithm_name)
 
-            # Create a new PBKDF2HMAC instance dynamically
-            hash_processor = PBKDF2HMAC(
-                algorithm=algorithm,
-                length=hash_length,
-                salt=salt,
-                iterations=iterations
-            )
+                # Create a new PBKDF2HMAC instance dynamically
+                hash_processor = PBKDF2HMAC(
+                    algorithm=algorithm,
+                    length=hash_length,
+                    salt=salt,
+                    iterations=iterations
+                )
 
-            try:
-                if hash_processor.derive(potential_password_match) == target_hash:
-                    return potential_password_match.decode()  # Match found
+                try:
+                    if hash_processor.derive(password) == target_hash:
+                        return password.decode()  # Match found
 
-            except InvalidKey:
-                continue  # Continue to the next entry
+                except InvalidKey:
+                    continue  # Continue to the next entry
 
-        return None  # No matches found
+            return None  # No matches found
     
-
-# class PBKDF2Handler(HashHandler):
-#     def __init__(self, hash_digest_with_metadata):
-#         self.hash_digest_with_metadata = hash_digest_with_metadata
-#         self.parameters = self.parse_hash_digest_with_metadata()
-
-#     def parse_hash_digest_with_metadata(self):
-#         """
-#         Parses the PBKDF2 metadata from hash_digest_with_metadata and decodes
-#         salt and target hashes for each item in the list.
-#         """
-#         self.target_hash_to_crack = []  # Reset target hashes
-
-#         for hash_digest in self.hash_digest_with_metadata:
-#             # Split the hash digest into components
-#             parts = hash_digest.split("$")
-#             if len(parts) != 5 or parts[1] != "pbkdf2":
-#                 raise ValueError(f"Invalid PBKDF2 hash format: {hash_digest}")
-
-#             try:
-#                 # Parse parameters into a dictionary
-#                 param_string = parts[2]
-#                 param_dict = dict(param.split("=") for param in param_string.split(","))
-
-#                 # Decode salt and hash
-#                 salt_b64 = parts[3]
-#                 hash_hex = parts[4]
-
-#                 salt = base64.urlsafe_b64decode(salt_b64)
-#                 target_hash = bytes.fromhex(hash_hex)
-
-#                 # Calculate lengths
-#                 hash_length = len(target_hash)
-#                 salt_length = len(salt)
-
-#                 # Determine algorithm based on hash length if "a" is not provided
-#                 algorithm = param_dict.get("a", None)
-#                 if not algorithm:
-#                     if hash_length == 32:
-#                         algorithm = "sha256"
-#                     elif hash_length == 64:
-#                         algorithm = "sha512"
-#                     else:
-#                         raise ValueError(f"Unknown algorithm for hash length: {hash_length}")
-
-#                 # Extract iterations
-#                 iterations = int(param_dict.get("i", 0))  # Iterations count
-#                 if not iterations > 0:
-#                     raise ValueError("PBKDF2 iterations must be a positive integer")
-
-#                 # Store parameters and decoded hashes
-#                 self.target_hash_to_crack.append({
-#                     "full_hash": hash_digest,
-#                     "algorithm": algorithm,
-#                     "iterations": iterations,
-#                     "hash_length": hash_length,
-#                     "salt": salt,
-#                     "target_hash": target_hash,
-#                 })
-#             except (ValueError, KeyError) as e:
-#                 raise ValueError(f"Error parsing PBKDF2 parameters: {hash_digest} - {e}")
-
-#         # Return the parsed parameters for logging or further use
-#         return algorithm, iterations, hash_length, salt_length
-
-#     def log_parameters(self):
-#         """Return a formatted log message for parameters."""
-#         algorithm, length, salt_length, iterations = self.parameters
-#         return (
-#             f"algorithm={algorithm}, hash length={length}, "
-#             f"salt length={salt_length}, iterations={iterations}"
-#         )
-
-#     def verify(self, potential_password_match):
-#         """
-#         Verifies a potential password against a list of stored PBKDF2 hashes.
-#         """
-#         for entry in self.target_hash_to_crack:
-#             algorithm_name = entry["algorithm"]
-#             hash_length = entry["hash_length"]
-#             iterations = entry["iterations"]
-#             salt = entry["salt"]
-#             target_hash = entry["target_hash"]
-
-#             algorithm = self.parse_algorithm(algorithm_name)
-
-#             # Create a new PBKDF2HMAC instance dynamically
-#             self.hash_processor = PBKDF2HMAC(
-#                 algorithm=algorithm,
-#                 length=hash_length,
-#                 salt=salt,
-#                 iterations=iterations
-#             )
-
-#             try:
-#                 if self.hash_processor.derive(potential_password_match) == target_hash:
-#                     return potential_password_match.decode()  # Match found
-            
-#             except InvalidKey:
-#                 print(f"Password did not match for target hash: {target_hash}")
-#                 continue
-
-#         return None  # No matches found
-
+        return self.process_with_threads(chunk, check_password)
+    
 
 class BcryptHandler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -485,34 +451,40 @@ class BcryptHandler(HashHandler):
 
         return parameters
 
-    def log_parameters(self):
-        """
-        Logs the first bcrypt hash's version and rounds for reference.
-        """
-        # Assuming all hashes have the same version and rounds
-        first_entry = self.parameters[0]
-        return f"version={first_entry['version']}, rounds={first_entry['rounds']}"
 
-    def verify(self, potential_password_match):
+    def log_parameters(self):
+        first_entry = self.parameters[0]
+        log_message = (f"version={first_entry['version']}, rounds={first_entry['rounds']}")
+        return log_message
+
+
+    def verify(self, chunk):
         """
         Verifies a potential password against the stored bcrypt hashes.
         """
-        try:
-            for entry in self.parameters:
-                target_hash = entry["full_hash"]
-                # Use bcrypt's checkpw function to verify the password
-                if bcrypt.checkpw(potential_password_match.encode("utf-8"), target_hash):
-                    return potential_password_match  # Return on first match
-            return None  # No matches found after checking all hashes
-        except bcrypt.error as e:
-            print(f"Error during bcrypt verification: {e}")
-            return None
+        def check_password(password):
+            try:
+                for entry in self.parameters:
+                    target_hash = entry["full_hash"]
+
+                    if bcrypt.checkpw(password, target_hash):
+                        return password.decode()
+                    
+                return None
+            except bcrypt.error as e:
+                print(f"Error during bcrypt verification: {e}")
+                return None
+            
+        return self.process_with_threads(chunk, check_password)
 
 
 class NTLMHandler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -538,44 +510,41 @@ class NTLMHandler(HashHandler):
         
         return parameters
 
+
     def log_parameters(self):
-        """
-        Log the underlying algorithm, encoding, and hash length.
-        Assumes uniform parameters for all hashes.
-        """
         first_entry = self.parameters[0]  # Use the first hash for metadata
-        return (
+        log_message = (
             f"underlying algorithm={first_entry['hash_func']}, "
             f"encoding={first_entry['encoding']}, "
             f"hash length={first_entry['length']}"
         )
+        return log_message
 
-    def verify(self, potential_password_match):
+
+    def verify(self, chunk):
         """
         Verify the password by calculating its NTLM hash and comparing it with the target hashes.
-        """
-        try:
-            # Convert potential password match to string if needed
-            password = (
-                potential_password_match.decode()
-                if isinstance(potential_password_match, bytes)
-                else potential_password_match
-            )
-
-            # Compute NTLM hash for the password
-            ntlm_hash = MD4.new()
-            ntlm_hash.update(password.encode("utf-16le"))
-            computed_hash = ntlm_hash.digest()
-
-            # Check if the computed hash matches any target hash
-            for entry in self.parameters:
-                if computed_hash == entry["target_hash"]:
-                    return password  # Return the matched password
-            
-            return None  # Return None if no match found
-        except Exception as e:
-            print(f"Error during NTLM hash verification: {e}")
+        """        
+        def check_password(password):
+            try:
+                password = password.decode() if isinstance(password, bytes) else password
+                ntlm_hash = MD4.new()
+                ntlm_hash.update(password.encode("utf-16le"))
+                computed_hash = ntlm_hash.digest()
+                
+                # Check if the computed hash matches any target hash
+                for entry in self.parameters:
+                    if computed_hash == entry["target_hash"]:
+                        return password  # Return the matched password
+                
+                return None  # Return None if no match found
+            except Exception as e:
+                print(f"Error during NTLM hash verification: {e}")
             return None
+                # Use ThreadPoolExecutor for internal threading
+        
+        return self.process_with_threads(chunk, check_password)
+
 
     @staticmethod
     def hex_to_bytes(hex_string):
@@ -587,8 +556,11 @@ class NTLMHandler(HashHandler):
 
 class MD5Handler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -607,32 +579,37 @@ class MD5Handler(HashHandler):
                 raise ValueError(f"Invalid MD5 hash format: {self.hash_digest_with_metadata}")
         return "UTF-8", len(parts[2])
     
+    
     def log_parameters(self):
         """Return a formatted log message for parameters."""
-        encoding, format = self.parameters
-        return (
-            f"encoding={encoding}, hash format={format * 4} bits ({int(format / 2)} bytes), {format}-character hexadecimal string"
-        )
+        encoding, format_length = self.parameters[0]
+        return self.format_standard_log(encoding, format_length)
     
-    def verify(self, potential_password_match):
-        try:
-            password = potential_password_match.decode()
-            md5_hash = hashlib.md5(password.encode('utf-8')).digest()
+
+    def verify(self, chunk):
+        def check_password(password):
+            try:
+                md5_hash = hashlib.md5(password).digest()
+                
+                if md5_hash in self.target_hash_to_crack:
+                    return password  # Return the matched password
+                
+                return None  # Return None if no match found
+                
+            except Exception as e:
+                print(f"Error during MD5 hash verification: {e}")
+                return None
             
-            if md5_hash in self.target_hash_to_crack:
-                return password  # Return the matched password
-            
-            return None  # Return None if no match found
-            
-        except Exception as e:
-            print(f"Error during MD5 hash verification: {e}")
-            return None
+        return self.process_with_threads(chunk, check_password)
 
 
 class SHA256Handler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -652,35 +629,27 @@ class SHA256Handler(HashHandler):
             
             return "UTF-8", len(parts[2])
 
-            
+
     def log_parameters(self):
         """Return a formatted log message for parameters."""
-        encoding, format = self.parameters
-        return (
-            f"encoding={encoding}, hash format={format * 4} bits ({int(format / 2)} bytes), {format}-character hexadecimal string"
-        )
+        encoding, format_length = self.parameters[0]
+        return self.format_standard_log(encoding, format_length)
     
-    def verify(self, potential_password_match):
+
+    def verify(self, chunk):
         """
-        Verify the password by calculating its SHA-256 hash and comparing it.
+        Verify the password by calculating its SHA-512 hash and comparing it.
         """
-        try:
-            password = potential_password_match.decode()
-            sha256_hash = hashlib.sha256(password.encode('utf-8')).digest()
-            
-            if sha256_hash in self.target_hash_to_crack:
-                return password  # Return the matched password
-            
-            return None  # Return None if no match found
-        except Exception as e:
-            print(f"Error during SHA-256 hash verification: {e}")
-            return None
+        return self.process_chunk(chunk, lambda password: hashlib.sha256(password).digest())
 
 
 class SHA512Handler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
+        super().__init__(hash_digest_with_metadata)
         self.hash_digest_with_metadata = hash_digest_with_metadata
         self.parameters = self.parse_hash_digest_with_metadata()
+        self.log_parameters()
+
 
     def parse_hash_digest_with_metadata(self):
         """
@@ -701,29 +670,18 @@ class SHA512Handler(HashHandler):
             
             return "UTF-8", len(parts[2])
 
-            
+
     def log_parameters(self):
         """Return a formatted log message for parameters."""
-        encoding, format = self.parameters
-        return (
-            f"encoding={encoding}, hash format={format * 4} bits ({int(format / 2)} bytes), {format}-character hexadecimal string"
-        )
-    
-    def verify(self, potential_password_match):
+        encoding, format_length = self.parameters[0]
+        return self.format_standard_log(encoding, format_length)
+
+
+    def verify(self, chunk):
         """
         Verify the password by calculating its SHA-512 hash and comparing it.
         """
-        try:
-            password = potential_password_match.decode()
-            sha512_hash = hashlib.sha512(password.encode('utf-8')).digest()
-                        
-            if sha512_hash in self.target_hash_to_crack:
-                return password  # Return the matched password
-            
-            return None  # Return None if no match found
-        except Exception as e:
-            print(f"Error during SHA-512 hash verification: {e}")
-            return None
+        return self.process_chunk(chunk, lambda password: hashlib.sha512(password).digest())
 
 
 # Assign handlers to HashHandler dynamically
@@ -758,15 +716,12 @@ def get_hash_handler(hash_type, hash_digest_with_metadata):
    
     except ValueError as e:
         raise ValueError(f"Error determining hash type or handler: {e}")
-    
-
-def crack_chunk_wrapper(hash_type, hash_digest_with_metadata, chunk, found_flag):
-    return crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag)
 
 
+# Sends a chunk of passwords to be verified instead of one at a time
 def crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag):
     chunk_count = 0
-    results = []  # Collect all matches
+    results = []
 
     if found_flag["found"] >= found_flag["goal"]:
         return results, chunk_count
@@ -774,14 +729,11 @@ def crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag):
     hash_handler = get_hash_handler(hash_type, hash_digest_with_metadata)
     hash_handler.parse_hash_digest_with_metadata()
 
-    for potential_password_match in chunk:
-        # print(f"Testing: {potential_password_match}")
-        if found_flag["found"] >= found_flag["goal"]:
-            return results, chunk_count
+    # Directly pass the batch to the hash_handler's `verify` method
+    matched_passwords = hash_handler.verify(chunk)
+    chunk_count += len(chunk)
 
-        chunk_count += 1
-        matched_passwords = hash_handler.verify(potential_password_match)
-        if matched_passwords is not None:
-            results.append(matched_passwords)  # Collect matches in the list
-    
-    return results, chunk_count  # Return all matches at once
+    if matched_passwords:
+        results.extend(matched_passwords)  # Append all matches
+
+    return results, chunk_count
