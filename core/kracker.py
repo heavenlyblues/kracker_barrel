@@ -1,5 +1,5 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import Manager
+from multiprocessing import Manager, Queue
 from multiprocessing.shared_memory import ShareableList
 from multiprocessing.managers import SharedMemoryManager
 import os, time
@@ -42,8 +42,7 @@ class BatchManager:
         self.kracker = kracker
         self.batch_generator = None
         self.total_passwords = 0
-        self.smm = SharedMemoryManager()
-        self.smm.start()
+        self.batch_queue = Queue(maxsize=kracker.preload_limit)  # Queue with a limit based on preload limit
         self.max_batches = 0
         self.rem_batches = 0
 
@@ -71,43 +70,28 @@ class BatchManager:
         self.rem_batches = self.max_batches
 
 
-    def preload_batches(self, limit):
-        """ Preload a specified number of batches into a single ShareableList.
-            Called by ProcessPoolExecutor
+    def preload_batches(self):
         """
-        shared_batches = []
-        max_password_length = 0
-
-        for _ in range(limit):
-            try:
-                batch = next(self.batch_generator)
-                max_password_length = max(max_password_length, *(len(password) for password in batch))
-                shared_batch = self.smm.ShareableList(batch)  # Store each batch directly
-                shared_batches.append(shared_batch.shm.name)  # Store shared memory names
-            except StopIteration:
-                print("No more batches to preload.")
-                break
-
-        self.shared_batches = self.smm.ShareableList(shared_batches)
-        self.max_password_length = max_password_length
-        self.rem_batches -= len(shared_batches)  # Update remaining batches
-        # print(f"Preloaded {len(self.shared_batches)} batches.")
-
-
-    def get_batch(self, index):
-        """Retrieve and deserialize a batch from the ShareableList."""
+        Preload batches into a multiprocessing.Queue until the queue is full
+        or the generator is exhausted.
+        """
         try:
-            shared_name = self.shared_batches[index]
-            shared_batch = ShareableList(name=shared_name)  # Access shared memory
-            return list(shared_batch)  # Convert back to a Python list
-        except IndexError:
-            print(f"No batch found at index {index}.")
+            while not self.batch_queue.full():
+                batch = next(self.batch_generator)
+                self.batch_queue.put(batch)
+                self.rem_batches -= 1
+        except StopIteration:
+            print("No more batches to preload.")
+
+    def get_batch(self):
+        """
+        Retrieve a batch from the multiprocessing.Queue.
+        """
+        try:
+            return self.batch_queue.get_nowait()  # Non-blocking call to fetch the batch
+        except Exception:
+            print("No batch available in the queue.")
             return None
-
-
-    def cleanup(self):
-        """Release shared memory."""
-        self.smm.shutdown()
 
 
 class Workers:
@@ -124,14 +108,11 @@ class Workers:
 
         try:
             with ProcessPoolExecutor(max_workers=self.kracker.workers) as executor:
-                self.batch_man.preload_batches(self.kracker.preload_limit)
-                current_batches = len(self.batch_man.shared_batches)  # Get total batches from the ShareableList
-                
+                self.batch_man.preload_batches()
                 futures = []  # Queue to hold active Future objects
-                current_batch_index = 0  # Start with the first batch
 
-                print(f"{LIGHT_YELLOW}Starting batch preloading...{RESET}", end=" ")
-                print(f"{DIM}Done!{RESET}")
+                print(f"{DIM}Starting batch preloading...{RESET}", end=" ")
+                print(f"{LIGHT_YELLOW}Done!{RESET}")
 
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
@@ -140,23 +121,20 @@ class Workers:
                           ncols=100, leave=True, ascii=True) as progress_bar:
 
                     # Main processing loop
-                    while futures or current_batch_index < current_batches or self.batch_man.rem_batches > 0:
-
-                        while len(futures) < self.kracker.preload_limit and current_batch_index < current_batches:
-                            # print(f"Submitting batch {current_batch_index}")
-                            batch = self.batch_man.get_batch(current_batch_index)
-                            # print(f"Batch {current_batch_index}: {batch}")
+                    while futures or self.batch_man.rem_batches > 0 or not self.batch_man.batch_queue.empty():
+                        # Submit tasks until the preload limit is reached
+                        while len(futures) < self.kracker.preload_limit and not self.batch_man.batch_queue.empty():
+                            batch = self.batch_man.get_batch()
                             if batch is None:
                                 break
                             future = executor.submit(
                                 crack_chunk,
                                 self.kracker.hash_type,
                                 self.kracker.hash_digest_with_metadata,
-                                batch, 
+                                batch,
                                 self.kracker.found_flag,
                             )
                             futures.append(future)
-                            current_batch_index += 1
 
                         # Process completed futures
                         for future in as_completed(futures):
@@ -169,30 +147,24 @@ class Workers:
                                     progress_bar.close()
                                     self.reporter.final_summary()
                                     return  # Exit immediately
+
                             except Exception as e:
                                 print(f"Error processing future: {e}")
                             finally:
                                 futures.remove(future)
-                        
+
                         # Dynamically preload more batches if needed
-                        if current_batch_index == current_batches and self.batch_man.rem_batches > 0:
-                            self.batch_man.preload_batches(
-                                min(self.kracker.preload_limit, self.batch_man.rem_batches)
-                            )
-                            current_batches = len(self.batch_man.shared_batches)
-                            current_batch_index = 0  # Reset for the newly preloaded batches
+                        if self.batch_man.rem_batches > 0 and self.batch_man.batch_queue.empty():
+                            self.batch_man.preload_batches()
 
                 progress_bar.close()
             self.reporter.final_summary()
 
         except KeyboardInterrupt:
             self.kracker.found_flag["found"] = -1
-            self.reporter.summary_log["message"] = "Process interrupted. Partial summary_log displayed."
-            self.reporter.summary_log["elapsed_time"] = time.time() - self.kracker.start_time
-            display_summary(self.kracker.found_flag, self.reporter.summary_log)
-
+            print("Process interrupted.")
         finally:
-            self.batch_man.cleanup()
+            print("Cleaning up resources.")
 
 
     # Process the resluts from completed futures
