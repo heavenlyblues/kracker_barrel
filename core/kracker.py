@@ -5,9 +5,10 @@ from multiprocessing.managers import SharedMemoryManager
 import os, time
 from pathlib import Path
 from tqdm import tqdm
-from core.hash_handler import HashHandler, crack_chunk
+from core.hash_handler import crack_chunk
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
+from utils.detector import HashTypeDetector
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, validate_password_file, load_target_hash
 from utils.reporter import display_summary, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
 # import pdb
@@ -18,7 +19,6 @@ class Kracker:
         self.operation = args.operation # dict, brut, mask, rule
         self.target_file = Path ("data") / args.target_file
         self.hash_digest_with_metadata = load_target_hash(self.target_file) # List of hashes to crack
-        self.hash_type = self.detect_hash_type() # argon, bcrypt, pbkfd2, scrypt, ntlm, md5, sha256, sha512
         self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
         self.mask_pattern = args.pattern # Mask-based attack
         self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
@@ -27,53 +27,14 @@ class Kracker:
         self.preload_limit = self.workers * 3
         self.batch_size = 5000  # Adjust batch size for performance
         
-        self.hash_handler = self.initialize_hash_handler()
-        
+        # Detect and initialize hash handler
+        self.hash_type = HashTypeDetector.detect(self.hash_digest_with_metadata)
+        self.hash_handler = HashTypeDetector.initialize(self.hash_digest_with_metadata, self.hash_type)
+
         self.manager = Manager()
         self.start_time = time.time()
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
         self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
-
-
-    def detect_hash_type(self):
-        type_check = self.hash_digest_with_metadata[0].split("$", 2)[1]
-        
-        # Use a dictionary to map type_check to hash types
-        hash_map = {
-            "argon2id": "argon",
-            "2b": "bcrypt",
-            "pbkdf2": "pbkdf2",
-            "scrypt": "scrypt",
-            "ntlm": "ntlm",
-            "md5": "md5",
-            "sha256": "sha256",
-            "sha512": "sha512"
-        }
-        # Return the mapped hash type or raise an error for unknown types
-        try:
-            return hash_map[type_check]
-        except KeyError:
-            raise ValueError(f"Unknown hash format: {type_check}")
-
-
-    def initialize_hash_handler(self):
-        handlers = {
-            "argon": HashHandler.Argon2Handler,
-            "scrypt": HashHandler.ScryptHandler,
-            "pbkdf2": HashHandler.PBKDF2Handler,
-            "bcrypt": HashHandler.BcryptHandler,
-            "ntlm": HashHandler.NTLMHandler,
-            "md5": HashHandler.MD5Handler,
-            "sha256": HashHandler.SHA256Handler,
-            "sha512": HashHandler.SHA512Handler,
-        }
-        try:
-            handler_class = handlers.get(self.hash_type)
-            if not handler_class:
-                raise ValueError(f"No handler found for hash type: {self.hash_type}")
-            return handler_class(self.hash_digest_with_metadata)  # Pass metadata if required
-        except ValueError as e:
-            raise ValueError(f"Error determining hash type or handler: {e}")
 
 
 class BatchManager:
