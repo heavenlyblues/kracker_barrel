@@ -1,4 +1,5 @@
-from core.kracker import Kracker, BatchManager, Workers, Reporter
+from core.kracker import Kracker, BatchManager, Workers
+from utils.reporter import Reporter
 from utils.cli import load_args, load_config
 import datetime
 import cProfile

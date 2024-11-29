@@ -1,16 +1,15 @@
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Manager, Queue
-from multiprocessing.shared_memory import ShareableList
-from multiprocessing.managers import SharedMemoryManager
-import os, time
+import time
 from pathlib import Path
 from tqdm import tqdm
 from core.hash_handler import crack_chunk
 from core.brut_gen import generate_brute_candidates, yield_brute_batches, get_brute_count
 from core.mask_gen import generate_mask_candidates, yield_maskbased_batches, get_mask_count
-from utils.detector import HashTypeDetector
+from utils.detector import Detector
 from utils.file_io import get_number_of_passwords, yield_dictionary_batches, validate_password_file, load_target_hash
-from utils.reporter import display_summary, PURPLE, GREEN, LIGHT_YELLOW, DIM, RESET
+from utils.logger import PURPLE, GREEN, LIGHT_YELLOW, RESET
+
 # import pdb
 
 
@@ -22,14 +21,14 @@ class Kracker:
         self.path_to_passwords = Path("refs") / args.password_list if args.password_list else None
         self.mask_pattern = args.pattern # Mask-based attack
         self.custom_strings = args.custom if args.custom else None # Mask-based custom string to append
-        self.brute_settings = dict(charset=args.charset, min=args.min, max=args.max)
-        self.workers = os.cpu_count() - 1
-        self.preload_limit = self.workers * 3
-        self.batch_size = 5000  # Adjust batch size for performance
+        self.brute_settings = dict(charset=args.charset if args.charset else None, min=args.min, max=args.max)
+        self.workers = max(1, Detector.get_cpu_count() - 1)
+        self.preload_limit = self.workers * 6
+        self.batch_size = 2000  # Adjust batch size for performance
         
         # Detect and initialize hash handler
-        self.hash_type = HashTypeDetector.detect(self.hash_digest_with_metadata)
-        self.hash_handler = HashTypeDetector.initialize(self.hash_digest_with_metadata, self.hash_type)
+        self.hash_type = Detector.detect(self.hash_digest_with_metadata)
+        self.hash_handler = Detector.initialize(self.hash_digest_with_metadata, self.hash_type)
 
         self.manager = Manager()
         self.start_time = time.time()
@@ -58,10 +57,12 @@ class BatchManager:
         elif self.kracker.operation == "brut":
             generator = generate_brute_candidates(self.kracker.brute_settings)
             self.batch_generator = yield_brute_batches(generator, self.kracker.batch_size)
+            self.total_passwords = get_brute_count(self.kracker.brute_settings)
 
         elif self.kracker.operation == "mask":
-            generator = generate_mask_candidates(self.mask_pattern, self.kracker.custom_strings)
+            generator = generate_mask_candidates(self.kracker.mask_pattern, self.kracker.custom_strings)
             self.batch_generator = yield_maskbased_batches(generator, self.kracker.batch_size)
+            self.total_passwords = get_mask_count(self.kracker.mask_pattern, self.kracker.custom_strings)
 
         elif self.kracker.operation == "rule":
             pass
@@ -81,14 +82,14 @@ class BatchManager:
                 self.batch_queue.put(batch)
                 self.rem_batches -= 1
         except StopIteration:
-            print("No more batches to preload.")
+            tqdm.write(f"{LIGHT_YELLOW}No more batches to preload.{RESET}")
 
     def get_batch(self):
         """
         Retrieve a batch from the multiprocessing.Queue.
         """
         try:
-            return self.batch_queue.get_nowait()  # Non-blocking call to fetch the batch
+            return self.batch_queue.get_nowait()
         except Exception:
             print("No batch available in the queue.")
             return None
@@ -108,17 +109,17 @@ class Workers:
 
         try:
             with ProcessPoolExecutor(max_workers=self.kracker.workers) as executor:
+                print(f"{LIGHT_YELLOW}Starting batch preloading... {RESET}")
                 self.batch_man.preload_batches()
-                futures = []  # Queue to hold active Future objects
 
-                print(f"{DIM}Starting batch preloading...{RESET}", end=" ")
-                print(f"{LIGHT_YELLOW}Done!{RESET}")
+                futures = []  # Queue to hold active Future objects
 
                 # Initialize tqdm with total number of batches
                 with tqdm(desc=f"{PURPLE}Batch Processing{RESET}", 
                           total=self.batch_man.max_batches, 
                           mininterval=0.1, smoothing=0.1, 
                           ncols=100, leave=True, ascii=True) as progress_bar:
+                    
 
                     # Main processing loop
                     while futures or self.batch_man.rem_batches > 0 or not self.batch_man.batch_queue.empty():
@@ -162,10 +163,9 @@ class Workers:
 
         except KeyboardInterrupt:
             self.kracker.found_flag["found"] = -1
-            print("Process interrupted.")
+            print(f"{LIGHT_YELLOW}Process interrupted.{RESET}")
         finally:
-            print("Cleaning up resources.")
-
+            print(f"{PURPLE}Program terminated.{RESET}")
 
     # Process the resluts from completed futures
     def process_task_result(self, task_result):
@@ -188,79 +188,3 @@ class Workers:
             traceback.print_exc()
         
         return False, chunk_count
-
-
-class Reporter:
-    def __init__(self, kracker):
-        self.kracker = kracker
-        self.summary_log = self.initialize_summary_log()
-
-
-    def __str__(self):
-        return (
-            f"\n{PURPLE}Kracker Configuration:{RESET}\n"
-            f"  Operation: {self.kracker.operation}\n"
-            f"  Target: {self.kracker.target_file}\n"
-            f"  Hash type: {self.kracker.hash_type}\n"
-            f"  Password list: {self.kracker.path_to_passwords}\n"
-            f"  Batch size: {self.kracker.batch_size}\n"
-            f"  Logical cores: {os.cpu_count()}\n"
-            f"  Workers: {self.summary_log["workers"]}\n"
-            f"  Process PID: {os.getpid()}\n"
-            f"  Preload limit: {self.kracker.preload_limit}\n"
-        )
-
-
-    def initialize_summary_log(self):
-        if self.kracker.operation == "dict":
-            number_of_passwords = get_number_of_passwords(self.kracker.path_to_passwords)
-        elif self.kracker.operation == "brut":
-            number_of_passwords = get_brute_count(self.kracker.brute_settings)
-        elif self.kracker.operation == "mask":
-            number_of_passwords = get_mask_count(self.kracker.mask_pattern, self.kracker.custom_strings)
-        elif self.kracker.operation == "rule":
-            number_of_passwords = 1
-
-        total_batches = (number_of_passwords // self.kracker.batch_size) + 1
-        
-        return {
-            "operation": self.kracker.operation,
-            "input_file": self.kracker.target_file,
-            "hash_type": self.kracker.hash_type,
-            "hash_parameters": None,
-            "file_scanned": self.kracker.path_to_passwords,
-            "workers": self.kracker.workers,
-            "batches": total_batches,
-            "batch_size": self.kracker.batch_size,
-            "items": number_of_passwords,
-            "total_count": 0,
-            "pwned": []
-        }
-
-
-    def final_summary(self):
-        """Display final summary after processing is completed."""
-        # Retrieve hash parameters
-        try:
-            self.summary_log["hash_parameters"] = self.kracker.hash_handler.log_parameters()
-        except AttributeError:
-            self.summary_log["hash_parameters"] = "N/A"  # Default if no parameters are available
-
-        # Construct the final message based on results
-        if self.kracker.found_flag["found"] == 0:
-            self.summary_log["message"] = (
-                "No match found in word list. Program terminated."
-            )
-        elif self.kracker.found_flag["found"] < self.kracker.found_flag["goal"]:
-            self.summary_log["message"] = (
-                f"{self.kracker.found_flag['found']} of {self.kracker.found_flag['goal']} "
-                "match(es) found in word list. Program terminated."
-            )
-        else:
-            self.summary_log["message"] = (
-                f"{self.kracker.found_flag['found']} of {self.kracker.found_flag['goal']} "
-                "match(es) found in word list."
-            )
-
-        self.summary_log["elapsed_time"] = time.time() - self.kracker.start_time
-        display_summary(self.kracker.found_flag, self.summary_log)

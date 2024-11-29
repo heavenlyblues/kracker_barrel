@@ -1,7 +1,8 @@
+import os
 from core.hash_handler import HashHandler
 
 
-class HashTypeDetector:
+class Detector:
     HASH_MAP = {
         "argon2id": "argon",
         "2b": "bcrypt",
@@ -12,6 +13,7 @@ class HashTypeDetector:
         "sha256": "sha256",
         "sha512": "sha512",
     }
+
 
     @staticmethod
     def detect(hash_metadata: list) -> str:
@@ -25,11 +27,12 @@ class HashTypeDetector:
         """
         try:
             type_check = hash_metadata[0].split("$", 2)[1]
-            return HashTypeDetector.HASH_MAP[type_check]
+            return Detector.HASH_MAP[type_check]
         except (KeyError, IndexError):
             raise ValueError(
-                f"Unknown or malformed hash format. Available types: {', '.join(HashTypeDetector.HASH_MAP.keys())}"
+                f"Unknown or malformed hash format. Available types: {', '.join(Detector.HASH_MAP.keys())}"
             )
+
 
     @staticmethod
     def initialize(hash_metadata: list, hash_type: str):
@@ -58,3 +61,17 @@ class HashTypeDetector:
             raise ValueError(
                 f"No handler available for hash type: {hash_type}. Supported types: {', '.join(handlers.keys())}"
             )
+
+
+    @staticmethod
+    def get_cpu_count():
+        try:
+            # Use process-specific CPU count if available
+            return len(os.sched_getaffinity(0))
+        except AttributeError:
+            # Fallback for Python <3.4 (no sched_getaffinity) or systems without affinity
+            try:
+                return os.cpu_count()
+            except NotImplementedError:
+                # Fallback if CPU count cannot be determined
+                return 1

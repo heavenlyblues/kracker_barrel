@@ -1,3 +1,4 @@
+import functools
 import itertools
 
 
@@ -10,7 +11,7 @@ MASK_MAP = {
     "?s+":   "!@#$%^&*()-_=+[]{}|;:',.<>?/`~",  # Special characters
     "?s":   "!@#$%^&*()-_=+",                   # Abridged special characters
     "?p":   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:',.<>?/`~",     # standard printable character
-    "?h":   "0123456789ABCDEF",                 # hexidecimal
+    "?h":   "0123456789AaBbCcDdEeFf",           # hexidecimal
     "?x":   " ",                                # Space character
     "?v":   "aeiou",                            # Vowels
     "?k":   "bcdfghjklmnpqrstvwxyz",            # Consonants
@@ -58,10 +59,12 @@ def generate_mask_candidates(mask, custom_strings=None):
             char_sets.append(custom_strings[m])  # Use the custom string
         else:
             raise ValueError(f"Invalid or uninitialized mask placeholder: ?{m}")
-
+    print(f"Parsed mask: {mask}")
+    print(f"Custom strings: {custom_strings}")
+    print(f"Character sets: {char_sets}")
     # Generate combinations
     for combo in itertools.product(*char_sets):
-        yield "".join(combo).encode()
+        yield "".join(combo).encode("utf-8")
 
 
 
@@ -80,16 +83,6 @@ def yield_maskbased_batches(generator, batch_size):
 
 
 def get_mask_count(mask, custom_strings=None):
-    """
-    Calculate the total number of possible combinations based on the mask and custom strings.
-
-    Args:
-        mask (str): The mask string specifying the pattern.
-        custom_strings (dict): A dictionary of custom placeholders and their replacements.
-
-    Returns:
-        int: Total number of combinations.
-    """
     custom_strings = parse_custom_strings(custom_strings) or {}
     char_sets = []
 
@@ -102,4 +95,4 @@ def get_mask_count(mask, custom_strings=None):
             raise ValueError(f"Invalid or uninitialized mask placeholder: ?{m}")
 
     # Calculate the total combinations
-    return len(list(itertools.product(*char_sets)))
+    return functools.reduce(lambda x, y: x * len(y), char_sets, 1)
