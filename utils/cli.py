@@ -78,7 +78,7 @@ def load_args(config=None):
     parser.add_argument(
         "--max",
         type=int,
-        default=8,
+        default=4,
         help="Maximum password length for brute-force attack (default: 8)."
     )
 

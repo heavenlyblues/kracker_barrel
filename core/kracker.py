@@ -33,7 +33,7 @@ class Kracker:
         self.manager = Manager()
         self.start_time = time.time()
         self.goal = len(self.hash_digest_with_metadata) # Number of hashes in file to crack
-        self.found_flag = self.manager.dict(found=0, goal=self.goal)  # Global found_flag for stopping on goal match
+        self.found_flag = self.manager.dict(found=0, goal=self.goal, matches={})  # Global found_flag for stopping on goal match
 
 
 class BatchManager:
@@ -142,7 +142,7 @@ class Workers:
                             try:
                                 self.process_task_result(future)
                                 progress_bar.update(1)  # Update the progress bar
-
+                                
                                 # Stop if all target hashes are matched
                                 if self.kracker.found_flag["found"] == self.kracker.found_flag["goal"]:
                                     progress_bar.close()
@@ -153,7 +153,6 @@ class Workers:
                                 print(f"Error processing future: {e}")
                             finally:
                                 futures.remove(future)
-
                         # Dynamically preload more batches if needed
                         if self.batch_man.rem_batches > 0 and self.batch_man.batch_queue.empty():
                             self.batch_man.preload_batches()
@@ -166,6 +165,7 @@ class Workers:
             print(f"{LIGHT_YELLOW}Process interrupted.{RESET}")
         finally:
             print(f"{PURPLE}Program terminated.{RESET}")
+            executor.shutdown
 
     # Process the resluts from completed futures
     def process_task_result(self, task_result):
@@ -175,12 +175,16 @@ class Workers:
             self.reporter.summary_log["total_count"] += chunk_count
 
             # Process all matches in the results list
-            for pwned_pwd in results:
-                self.reporter.summary_log["pwned"].append(pwned_pwd)
+            for target_hash, pwned_pwd  in results:
+                matches = self.kracker.found_flag["matches"]
+                matches[target_hash] = pwned_pwd
+                self.kracker.found_flag["matches"] = matches
+
+                tqdm.write(f"{GREEN}[MATCH!] --> {pwned_pwd} --> {target_hash}{RESET}")
                 self.kracker.found_flag["found"] += 1
-                tqdm.write(f"{GREEN}[MATCH] Password found: {pwned_pwd}{RESET}")
 
             return True, chunk_count
+        
         except Exception as e:
             import traceback
             print(f"Error in process_task_result: {e}")

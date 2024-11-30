@@ -19,22 +19,22 @@ MASK_MAP = {
 }
 
 
-def parse_custom_strings(custom_strings):
-    """
-    Parse the --custom argument into a dictionary.
+# def parse_custom_strings(custom_strings):
+#     """
+#     Parse the --custom argument into a dictionary.
     
-    Args:
-        custom_strings (str): Custom string input from CLI (e.g., "c=hello").
+#     Args:
+#         custom_strings (str): Custom string input from CLI (e.g., "c=hello").
     
-    Returns:
-        dict: Dictionary mapping custom placeholders to their replacements.
-    """
-    custom_dict = {}
-    if custom_strings:
-        for entry in custom_strings.split(","):
-            key, value = entry.split("=")
-            custom_dict[key] = value
-    return custom_dict
+#     Returns:
+#         dict: Dictionary mapping custom placeholders to their replacements.
+#     """
+#     custom_dict = {}
+#     if custom_strings:
+#         for entry in custom_strings.split(","):
+#             key, value = entry.split("=")
+#             custom_dict[key] = value
+#     return custom_dict
 
 
 def generate_mask_candidates(mask, custom_strings=None):
@@ -49,7 +49,7 @@ def generate_mask_candidates(mask, custom_strings=None):
         Encoded password strings based on the mask.
     """
 
-    custom_strings = parse_custom_strings(custom_strings) or {}
+    custom_strings = dict(c=custom_strings) or {}
     char_sets = []
 
     for m in mask.split("?")[1:]:  # Skip the first empty split
@@ -67,7 +67,6 @@ def generate_mask_candidates(mask, custom_strings=None):
         yield "".join(combo).encode("utf-8")
 
 
-
 def yield_maskbased_batches(generator, batch_size):
     batch = []
     total_batches = 0
@@ -83,7 +82,7 @@ def yield_maskbased_batches(generator, batch_size):
 
 
 def get_mask_count(mask, custom_strings=None):
-    custom_strings = parse_custom_strings(custom_strings) or {}
+    custom_strings = dict(c=custom_strings) or {}
     char_sets = []
 
     for m in mask.split("?")[1:]:  # Skip the first empty split

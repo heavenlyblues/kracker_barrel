@@ -55,7 +55,7 @@ class HashHandler:
             try:
                 computed_hash = hash_function(password)
                 if computed_hash in self.target_hash_to_crack:
-                    return password.decode()  # Return the matched password
+                    return computed_hash, password.decode()  # Return the matched password
                 return None  # Return None if no match found
             except Exception as e:
                 print(f"Error during hash verification: {e}")
@@ -191,14 +191,14 @@ class Argon2Handler(HashHandler):
             for target_hash, processor in zip(self.hash_digest_with_metadata, self.precomputed_processors):
                 try:
                     if processor.verify(target_hash, password):
-                        return password.decode()  # Match found
+                        return target_hash, password.decode()  # Match found
                 except Exception:
                     # Continue to the next hash if verification fails
                     continue
             return None  # No matches found
     
-        return self.process_with_threads(chunk, check_password)
-
+        results = self.process_with_threads(chunk, check_password)
+        return {password: hash_ for password, hash_ in results if results is not None}
 
 class ScryptHandler(HashHandler):
     def __init__(self, hash_digest_with_metadata):
@@ -728,11 +728,14 @@ def crack_chunk(hash_type, hash_digest_with_metadata, chunk, found_flag):
     hash_handler = get_hash_handler(hash_type, hash_digest_with_metadata)
     hash_handler.parse_hash_digest_with_metadata()
 
-    # Directly pass the batch to the hash_handler's `verify` method
     matched_passwords = hash_handler.verify(chunk)
     chunk_count += len(chunk)
 
     if matched_passwords:
-        results.extend(matched_passwords)  # Append all matches
+        results.extend(matched_passwords.items())  # Append all hash-password pairs
+        found_flag["matches"].update(matched_passwords)
 
+    if found_flag["found"] >= found_flag["goal"]:
+        return results, chunk_count
+        
     return results, chunk_count

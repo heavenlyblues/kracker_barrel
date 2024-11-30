@@ -49,7 +49,6 @@ class Reporter:
             "batch_size": self.kracker.batch_size,
             "items": number_of_passwords,
             "total_count": 0,
-            "pwned": []
         }
 
 

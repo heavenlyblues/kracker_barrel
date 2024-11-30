@@ -16,7 +16,7 @@
 operation: mask
 target_file: pbkdf2_test.txt
 pattern: "?l?l?c?d?d"
-custom: c=#!*
+custom: "#!*"
 
 # operation: brut
 # target_file: argon_test2.txt
@@ -27,10 +27,13 @@ custom: c=#!*
 # Configuration for Cracker Barrel Operations
 # Uncomment the relevant section for the desired operation and fill in the values.
 
+
 # ----- DICTIONARY ATTACK -----
 # operation: dict
 # target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
 # password_list: <dictionary.txt>      # File with potential passwords (place in "refs/")
+# bash>> python main.py -d argon.txt rockyou.txt
+
 
 # ----- BRUTE FORCE ATTACK -----
 # operation: brut
@@ -38,12 +41,15 @@ custom: c=#!*
 # charset: abcdef12345                # Charset for brute force (default: alphanumeric)
 # min: 1                              # Minimum password length
 # max: 4                              # Maximum password length
+# bash>> python main.py -b argon.txt --charset aitsrvbchelowrdqu --min 4 --max 5
+
 
 # ----- MASK-BASED ATTACK -----
 # operation: mask
 # target_file: <hashed_passwords.txt>  # File containing hashed passwords (place in "data/")
-# pattern: "?u?l?d"                    # Mask pattern (e.g., ?u = uppercase, ?l = lowercase, ?d = digit)
-# custom: c=12
+# pattern: "?u?l?d"                    # Mask pattern (e.g., ?u = uppercase, ?l = lowercase, ?d = digit, see MASK_MAP for full dictionary)
+# custom: "12"
+# bash>> python main.py -m argon.txt --pattern "?l?l?s?x?c?c"
 
 
 # ----- RULE-BASED ATTACK -----

@@ -43,12 +43,14 @@ def display_summary(found_flag, summary_log):
     logging.info("-" * 57)
     logging.info(centered_message)
     logging.info("-" * 57)
-
+    
     # Build and log the summary
     if found_flag["found"] > 0:
-        for recovered_password in summary_log["pwned"]:
-            result_message = f"Password match found --> {recovered_password}"
-            logging.info(result_message)
+        for hash_value, recovered_password in found_flag["matches"].items():
+            result_pass = f"Password match --> {recovered_password}"
+            result_hash = f"For hash value --> {hash_value}"
+            logging.info(result_pass)
+            logging.info(result_hash)
 
     elif found_flag["found"] == 0:
         result_message = "No match found."
